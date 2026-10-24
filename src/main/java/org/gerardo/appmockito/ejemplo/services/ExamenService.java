@@ -2,7 +2,9 @@ package org.gerardo.appmockito.ejemplo.services;
 
 import org.gerardo.appmockito.ejemplo.models.Examen;
 
+import java.util.Optional;
+
 public interface ExamenService {
-    Examen findExamenPorNombre(String nombre);
+    Optional<Examen> findExamenPorNombre(String nombre);
 
 }
