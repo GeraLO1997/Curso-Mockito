@@ -85,4 +85,32 @@ class ExamenServiceImplTest {
         assertTrue(examen.getPreguntas().contains("aritmetica"));
     }
 
+    @Test
+    void testPreguntasExamenVerify(){
+        when(repository.findAll()).thenReturn(Datos.EXAMENES);
+        // le indicamos que solo cuando invoque con el agumento 5 tendremos las preguntas (match arguments)
+        // agregamos anyLong() para que acepte cualquier tipo de dato
+        when(preguntaRepository.findPreguntasPorExamenId(anyLong())).thenReturn(Datos.PREGUNTAS);
+
+        Examen examen = service.findExamenPorNombreConPreguntas("Matematicas");
+        assertEquals(5, examen.getPreguntas().size());
+        assertTrue(examen.getPreguntas().contains("aritmetica"));
+
+        // aqui pondemos el . despues de los parentesis
+        verify(repository).findAll();
+        verify(preguntaRepository).findPreguntasPorExamenId(anyLong());
+    }
+
+    @Test
+    void testNoExisteExamenVerify(){
+        when(repository.findAll()).thenReturn(Collections.emptyList());
+        when(preguntaRepository.findPreguntasPorExamenId(anyLong())).thenReturn(Datos.PREGUNTAS);
+
+        Examen examen = service.findExamenPorNombreConPreguntas("Matematicas");
+        assertNull(examen);
+
+        verify(repository).findAll();
+        verify(preguntaRepository).findPreguntasPorExamenId(anyLong());
+    }
+
 }

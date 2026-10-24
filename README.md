@@ -400,3 +400,126 @@ import static org.mockito.Mockito.*;
 ```
 
 **Resumen:** el servicio es real, los dos repositorios son mocks; `when(...).thenReturn(...)` prepara las respuestas, JUnit verifica resultados y `verify()` comprueba las interacciones.
+
+# 3. Probando interacciones con `verify()` en Mockito
+
+## Concepto principal
+
+Mockito permite **simular respuestas** mediante `when(...).thenReturn(...)` y **verificar llamadas** mediante `verify(...)`. JUnit (`assertEquals`, `assertNull`, etc.) comprueba resultados; Mockito `verify` comprueba interacciones con dependencias simuladas.
+
+**Analogía:** además de comprobar que un empleado entregó las preguntas correctas, comprobamos si consultó al departamento correcto.
+
+## Sintaxis
+
+```java
+verify(repository).findAll(); // Exactamente una vez
+verify(repository, times(1)).findAll(); // Equivalente
+verify(repository, never()).findAll(); // Ninguna vez
+verify(repository, times(2)).findAll(); // Exactamente dos veces
+```
+
+`verify(mock)` devuelve un objeto que permite indicar, después del punto, **qué método y argumentos** se desean comprobar. No se coloca `verify` alrededor de una llamada real para ejecutarla: verifica el historial de invocaciones que Mockito registró.
+
+## Primera prueba: examen con preguntas
+
+```java
+@Test
+void testPreguntasExamenVerify() {
+    when(repository.findAll()).thenReturn(Datos.EXAMENES);
+    when(preguntaRepository.findPreguntasPorExamenId(anyLong()))
+            .thenReturn(Datos.PREGUNTAS);
+
+    Examen examen = service.findExamenPorNombreConPreguntas("Matematicas");
+
+    assertNotNull(examen);
+    assertEquals(5, examen.getPreguntas().size());
+    assertTrue(examen.getPreguntas().contains("aritmetica"));
+
+    verify(repository).findAll();
+    verify(preguntaRepository).findPreguntasPorExamenId(5L);
+}
+```
+
+**Secuencia:**
+1. El servicio real llama a `repository.findAll()`.
+2. El mock devuelve la lista configurada.
+3. El servicio encuentra el examen de Matemáticas con ID `5L`.
+4. Llama a `preguntaRepository.findPreguntasPorExamenId(5L)`.
+5. El segundo mock devuelve cinco preguntas.
+6. JUnit verifica el resultado y Mockito comprueba las llamadas.
+
+`anyLong()` es un *argument matcher*: acepta argumentos primitivos `long` y valores `Long` no nulos, pero no significa «cualquier tipo». `verify(...).findPreguntasPorExamenId(anyLong())` acepta cualquier ID compatible. Si la lógica requiere específicamente el ID `5L`, `verify(...).findPreguntasPorExamenId(5L)` es más preciso.
+
+## Segunda prueba: examen inexistente
+
+**El código original falla** porque exige que se invoque el repositorio de preguntas cuando no se encontró ningún examen:
+
+```java
+when(repository.findAll()).thenReturn(Collections.emptyList());
+Examen examen = service.findExamenPorNombreConPreguntas("Matematicas");
+assertNull(examen);
+verify(repository).findAll();
+verify(preguntaRepository).findPreguntasPorExamenId(anyLong()); // INCORRECTO
+```
+
+En `ExamenServiceImpl`, la consulta de preguntas ocurre **solo si** `examenOptional.isPresent()` es verdadero. Con lista vacía, el servicio devuelve `null` y nunca consulta preguntas.
+
+### Corrección recomendada
+
+```java
+@Test
+void testNoExisteExamenVerify() {
+    when(repository.findAll()).thenReturn(Collections.emptyList());
+
+    Examen examen = service.findExamenPorNombreConPreguntas("Matematicas");
+
+    assertNull(examen);
+    verify(repository).findAll();
+    verifyNoInteractions(preguntaRepository);
+}
+```
+
+`verifyNoInteractions(preguntaRepository)` comprueba que no hubo **ninguna** interacción con ese mock. Otra alternativa:
+
+```java
+verify(preguntaRepository, never()).findPreguntasPorExamenId(anyLong());
+```
+
+Esta segunda instrucción verifica únicamente que **ese método con ese patrón de argumentos** no fue invocado; otras llamadas al mock podrían haber ocurrido. `verifyNoInteractions()` es más estricto.
+
+**Importante:** `when(preguntaRepository.findPreguntasPorExamenId(anyLong())).thenReturn(Datos.PREGUNTAS)` no provoca que el método se ejecute desde el servicio. Solo configura qué devolvería **si** fuera llamado. En este escenario, la configuración es innecesaria y puede generar advertencias de stubbing innecesario con configuraciones estrictas de Mockito.
+
+## Métodos relacionados
+
+| Método | Significado |
+|---|---|
+| `verify(mock).metodo()` | Método llamado exactamente una vez. |
+| `verify(mock, times(n)).metodo()` | Llamado exactamente `n` veces. |
+| `verify(mock, never()).metodo()` | Ese método no fue llamado. |
+| `verifyNoInteractions(mock)` | No hubo ninguna interacción con el mock. |
+| `verifyNoMoreInteractions(mock)` | No quedan interacciones sin verificar en el mock. Úsalo con moderación. |
+| `anyLong()` | Coincide con argumentos `long` o `Long` no nulos. |
+| `eq(5L)` | Coincide con el valor específico `5L`, útil al combinar matchers. |
+| `assertNull(objeto)` | JUnit verifica que el resultado sea `null`. |
+
+## Errores y consejos
+
+- **Configurar no es verificar:** `when(...).thenReturn(...)` define una respuesta; `verify(...)` comprueba una interacción que realmente ocurrió.
+- **No exigir llamadas innecesarias:** si el examen no existe, consultar preguntas sería un error de lógica.
+- **Preferir argumentos exactos** (`5L`) cuando interesa comprobar que se utilizó el identificador correcto.
+- **No verificar cada llamada interna por costumbre:** verificar interacciones relevantes para el comportamiento, sin acoplar demasiado las pruebas a detalles de implementación.
+- **Evitar datos mutables compartidos:** `Datos.EXAMENES` contiene objetos `Examen` modificables; `setPreguntas()` podría afectar pruebas posteriores. Preferir crear instancias nuevas por prueba.
+- **Usar `@BeforeEach`** para crear mocks nuevos e inyectarlos al servicio real.
+
+## Importaciones
+
+```java
+import org.junit.jupiter.api.Test;
+import java.util.Collections;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+```
+
+## Regla para memorizar
+
+**`when` prepara → el servicio actúa → `assert` comprueba el resultado → `verify` comprueba la interacción.**
