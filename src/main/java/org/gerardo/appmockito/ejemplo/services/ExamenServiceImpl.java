@@ -36,7 +36,19 @@ public class ExamenServiceImpl implements ExamenService{
         return examen;
     }
 
+    @Override
+    public Examen guardar(Examen examen) {
+        //le preguntamos si no tiene preguntas
+        if (!examen.getPreguntas().isEmpty()){
+            // guardamos un examen con preguntas
+            preguntaRepository.guardarVarias(examen.getPreguntas());
+        }
+        // guardamos un examen sin preguntas
+        return examenRepository.guardar(examen);
+    }
+
     // Nuestra clase service va a tener 2 formas de obtener el examen
     // 1- sin su preguntas
     // 2- con sus preguntas
+
 }

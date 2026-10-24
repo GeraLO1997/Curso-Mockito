@@ -2,9 +2,9 @@ package org.gerardo.appmockito.ejemplo.services;
 
 import org.gerardo.appmockito.ejemplo.models.Examen;
 import org.gerardo.appmockito.ejemplo.repositories.ExamenRepository;
-import org.gerardo.appmockito.ejemplo.repositories.ExamenRepositoryImpl;
 import org.gerardo.appmockito.ejemplo.repositories.PreguntaRepository;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -125,6 +125,38 @@ class ExamenServiceImplTest {
 
         verify(repository).findAll();
         verify(preguntaRepository).findPreguntasPorExamenId(anyLong());
+    }
+
+    @Test
+    @DisplayName("Guardar Examen")
+    void testGuardarExamen(){
+        // guardamos cualquier tipo de examen sin preguntas
+        when(repository.guardar(any(Examen.class))).thenReturn(Datos.EXAMEN);
+
+        Examen examen = service.guardar(Datos.EXAMEN);
+        assertNotNull(examen.getId());
+        assertEquals(8L,examen.getId());
+        assertEquals("Fisica", examen.getNombre());
+
+        verify(repository).guardar(any(Examen.class));
+        verify(preguntaRepository).guardarVarias(anyList());
+    }
+
+    @Test
+    @DisplayName("Guardar Examen con preguntas")
+    void testGuardarExamenConPeguntas(){
+        Examen newExamen = Datos.EXAMEN;
+        newExamen.setPreguntas(Datos.PREGUNTAS);
+
+        when(repository.guardar(any(Examen.class))).thenReturn(Datos.EXAMEN);
+
+        Examen examen = service.guardar(newExamen); // agui lo guardamos
+        assertNotNull(examen.getId());
+        assertEquals(8L,examen.getId());
+        assertEquals("Fisica", examen.getNombre());
+
+        verify(repository).guardar(any(Examen.class));
+        verify(preguntaRepository).guardarVarias(anyList());
     }
 
 }

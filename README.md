@@ -808,3 +808,151 @@ Esta combinación es muy utilizada en pruebas unitarias de servicios Java, inclu
 
 No pude generar el archivo .md descargable en esta ocasión. La explicación queda aquí organizada para que puedas copiarla a tus apuntes.
 
+# 5. Probando el método guardar() con Mockito
+
+## Objetivo
+
+Probar la lógica real de `ExamenServiceImpl.guardar(Examen)` aislando sus dos dependencias con Mockito. El servicio guarda preguntas **solo si la lista no está vacía** y después guarda el examen.
+
+```java
+@Override
+public Examen guardar(Examen examen) {
+    if (!examen.getPreguntas().isEmpty()) {
+        preguntaRepository.guardarVarias(examen.getPreguntas());
+    }
+    return examenRepository.guardar(examen);
+}
+```
+
+## Interfaces implicadas
+
+```java
+public interface ExamenRepository {
+    Examen guardar(Examen examen);
+    List<Examen> findAll();
+}
+
+public interface PreguntaRepository {
+    void guardarVarias(List<String> preguntas);
+    List<String> findPreguntasPorExamenId(Long id);
+}
+```
+
+`ExamenRepository.guardar()` devuelve un `Examen`; `PreguntaRepository.guardarVarias()` es `void`, por lo que no devuelve valor.
+
+## Entender `when(repository.guardar(any(Examen.class))).thenReturn(Datos.EXAMEN)`
+
+1. `repository` es el mock de `ExamenRepository`.
+2. `guardar(...)` es la llamada que queremos simular.
+3. `any(Examen.class)` es un *argument matcher*: coincide con cualquier instancia no nula compatible con `Examen`.
+4. `when(...)` inicia la configuración (*stubbing*) de la llamada.
+5. `thenReturn(Datos.EXAMEN)` define el objeto devuelto por el mock cuando recibe una llamada coincidente.
+
+```java
+when(repository.guardar(any(Examen.class)))
+        .thenReturn(new Examen(8L, "Fisica"));
+```
+
+**No se guarda realmente nada en una base de datos.** El mock simplemente devuelve el objeto configurado. Incluso si recibe un examen distinto, devolverá el objeto fijado en `thenReturn`.
+
+## Preparación con anotaciones
+
+```java
+@ExtendWith(MockitoExtension.class)
+class ExamenServiceImplTest {
+    @Mock ExamenRepository repository;
+    @Mock PreguntaRepository preguntaRepository;
+    @InjectMocks ExamenServiceImpl service;
+}
+```
+
+- `@ExtendWith(MockitoExtension.class)` activa la integración de Mockito con JUnit Jupiter.
+- `@Mock` crea dependencias simuladas.
+- `@InjectMocks` crea/prepara el servicio real e intenta inyectarle los mocks.
+
+Se recomienda usar inyección por constructor y atributos `final` en `ExamenServiceImpl`.
+
+## Prueba 1: guardar un examen sin preguntas
+
+```java
+@Test
+@DisplayName("Guardar examen sin preguntas")
+void testGuardarExamenSinPreguntas() {
+    Examen entrada = new Examen(null, "Fisica");
+    Examen guardado = new Examen(8L, "Fisica");
+
+    when(repository.guardar(same(entrada))).thenReturn(guardado);
+
+    Examen resultado = service.guardar(entrada);
+
+    assertNotNull(resultado);
+    assertEquals(8L, resultado.getId());
+    assertEquals("Fisica", resultado.getNombre());
+
+    verify(repository).guardar(same(entrada));
+    verifyNoInteractions(preguntaRepository);
+}
+```
+
+`same(entrada)` comprueba identidad de referencia: el servicio entrega al repositorio exactamente ese objeto. `verifyNoInteractions` comprueba que no se llamó a ningún método del repositorio de preguntas.
+
+## Prueba 2: guardar un examen con preguntas
+
+```java
+@Test
+@DisplayName("Guardar examen con preguntas")
+void testGuardarExamenConPreguntas() {
+    Examen entrada = new Examen(null, "Fisica");
+    entrada.setPreguntas(List.of("Movimiento", "Energia"));
+    Examen guardado = new Examen(8L, "Fisica");
+
+    when(repository.guardar(same(entrada))).thenReturn(guardado);
+
+    Examen resultado = service.guardar(entrada);
+
+    assertNotNull(resultado);
+    assertEquals(8L, resultado.getId());
+    assertEquals("Fisica", resultado.getNombre());
+
+    verify(preguntaRepository).guardarVarias(entrada.getPreguntas());
+    verify(repository).guardar(same(entrada));
+}
+```
+
+El método `guardarVarias` es `void`: por defecto, un mock no hace nada cuando se invoca. No hace falta `when(...).thenReturn(...)`; basta con verificar la llamada.
+
+## `anyList()` y verificación de argumentos
+
+```java
+verify(preguntaRepository).guardarVarias(anyList());
+```
+
+`anyList()` acepta cualquier lista no nula. Comprueba que se pasó una lista, **pero no comprueba su contenido**. Para validar el contenido, usa una lista esperada, `eq(...)` o `ArgumentCaptor` (tema posterior):
+
+```java
+verify(preguntaRepository).guardarVarias(
+    List.of("Movimiento", "Energia")
+);
+```
+
+## Errores importantes en los ejemplos originales
+
+1. En la prueba **sin preguntas**, `verify(preguntaRepository).guardarVarias(anyList())` es incorrecto: el servicio no invoca ese método. Debe utilizarse `never()` o `verifyNoInteractions(preguntaRepository)`.
+2. `Datos.EXAMEN` es un objeto `static final`, **no inmutable**. Hacer `newExamen = Datos.EXAMEN` y después `setPreguntas(...)` modifica el mismo objeto compartido. Las pruebas pueden influirse entre sí. Crea un `new Examen(...)` por test.
+3. Si configuras `thenReturn(Datos.EXAMEN)` y también envías `Datos.EXAMEN`, las aserciones de ID y nombre pueden pasar sin demostrar que se persistió nada. Un caso más realista usa un examen de entrada sin ID y otro devuelto con ID.
+4. `verify(repository).guardar(any(Examen.class))` no comprueba cuál examen se envió. Usa `same(entrada)`, `eq(entrada)` o un captor cuando sea relevante.
+5. La implementación actual guarda las preguntas **antes** de guardar el examen. En sistemas reales, puede ser necesario guardar primero el examen para obtener su ID y vincular las preguntas, además de gestionar transacciones. Aquí solo se prueba el comportamiento implementado.
+
+## Resumen rápido
+
+| Herramienta | Función |
+|---|---|
+| `when(...).thenReturn(...)` | Configura el valor que devolverá un método simulado. |
+| `any(Examen.class)` | Coincide con cualquier instancia no nula compatible con `Examen`. |
+| `anyList()` | Coincide con cualquier lista no nula. |
+| `same(objeto)` | Coincide con la misma referencia de objeto. |
+| `verify(mock).metodo()` | Comprueba que el método se llamó exactamente una vez. |
+| `verifyNoInteractions(mock)` | Comprueba que el mock no recibió llamadas. |
+| `never()` | Comprueba que una llamada específica no ocurrió. |
+
+**Regla:** Mockito simula la persistencia; JUnit valida el resultado; `verify` comprueba qué métodos fueron invocados y con qué argumentos.
