@@ -6,6 +6,12 @@ import org.gerardo.appmockito.ejemplo.repositories.ExamenRepositoryImpl;
 import org.gerardo.appmockito.ejemplo.repositories.PreguntaRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.mockito.junit.jupiter.MockitoExtension;
+
 import static org.mockito.Mockito.*;
 
 import java.util.Arrays;
@@ -15,20 +21,28 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@ExtendWith(MockitoExtension.class)
 class ExamenServiceImplTest {
 
+    @Mock
     ExamenRepository repository;
-    ExamenService service;
+    @Mock
     PreguntaRepository preguntaRepository;
+
+    @InjectMocks
+    ExamenServiceImpl service; // Aqui necesitamos la clase concreta por que no se puede instanciar una interface
 
     @BeforeEach
     void setUp() {
+        // Necesitamos crear una implementacion concreta, tenemos que habilitar el uso de anotaciones
+//        MockitoAnnotations.openMocks(this); // le pasamos this como esta referencia
+
         // 1. Crear el repositorio simulado.
-        repository = mock(ExamenRepository.class);
-        preguntaRepository = mock(PreguntaRepository.class);
+//        repository = mock(ExamenRepository.class);
+//        preguntaRepository = mock(PreguntaRepository.class);
 
                 // 2. Crear el servicio REAL e inyectarle el mock.
-        service = new ExamenServiceImpl(repository,preguntaRepository);
+//        service = new ExamenServiceImpl(repository,preguntaRepository);
 
     }
 

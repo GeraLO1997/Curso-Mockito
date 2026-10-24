@@ -523,3 +523,288 @@ import static org.mockito.Mockito.*;
 ## Regla para memorizar
 
 **`when` prepara → el servicio actúa → `assert` comprueba el resultado → `verify` comprueba la interacción.**
+
+
+# 4. Inyección de dependencias con @Mock, @InjectMocks y @ExtendWith
+
+En las lecciones anteriores creamos nuestros mocks manualmente:
+```java
+    repository = mock(ExamenRepository.class);
+    preguntaRepository = mock(PreguntaRepository.class);
+    
+    service = new ExamenServiceImpl(repository, preguntaRepository);
+```
+
+
+Ahora vamos a conseguir exactamente el mismo objetivo, pero utilizando anotaciones de Mockito.
+
+Estas anotaciones permiten escribir pruebas más limpias, reducir código repetitivo y preparar automáticamente las dependencias que necesita la clase que estamos probando.
+
+## 1. ¿Qué es la inyección de dependencias?
+   La inyección de dependencias consiste en proporcionar a una clase los objetos que necesita para funcionar, en lugar de obligarla a crearlos por su cuenta.
+
+En nuestro proyecto, ExamenServiceImpl necesita dos dependencias:
+- ExamenRepository, para buscar exámenes.
+- PreguntaRepository, para buscar preguntas.
+  Imagina que el servicio es un cocinero y los repositorios son sus proveedores de ingredientes.
+
+El cocinero no tiene que fabricar los ingredientes: alguien se los entrega para que pueda preparar el platillo.
+
+En una prueba unitaria, Mockito nos permite entregarle proveedores simulados.
+## 2. Antes y después de utilizar anotaciones
+```java
+@BeforeEach
+void setUp() {
+    repository = mock(ExamenRepository.class);
+    preguntaRepository = mock(PreguntaRepository.class);
+
+    service = new ExamenServiceImpl(
+        repository, preguntaRepository
+    );
+}
+```
+
+Ahora utilizando anotaciones
+
+```java
+@ExtendWith(MockitoExtension.class)
+class ExamenServiceImplTest {
+
+    @Mock
+    ExamenRepository repository;
+
+    @Mock
+    PreguntaRepository preguntaRepository;
+
+    @InjectMocks
+    ExamenServiceImpl service;
+}
+```
+
+Las dos formas son válidas. La segunda aprovecha la integración de Mockito con JUnit 5.
+
+## 3. ¿Qué hace `@ExtendWith(MockitoExtension.class)`?
+
+```java
+@ExtendWith(MockitoExtension.class)
+class ExamenServiceImplTest {
+}
+```
+
+`@ExtendWith` es una anotación de JUnit 5 que registra una extensión para participar en la ejecución de las pruebas.
+
+MockitoExtension es la extensión de Mockito para JUnit Jupiter.
+
+Al combinarlas, Mockito puede inicializar los campos anotados con @Mock y @InjectMocks antes de cada prueba, además de proporcionar otras funciones como la validación de configuraciones innecesarias.
+
+Sin esta extensión, las anotaciones de Mockito no se inicializan automáticamente por el simple hecho de escribirlas.
+
+Importante: `@ExtendWith` pertenece a JUnit 5, mientras que MockitoExtension pertenece a la integración de Mockito con JUnit Jupiter.
+
+## 4. ¿Qué hace `@Mock`?
+
+```java
+@Mock
+ExamenRepository repository;
+
+@Mock
+PreguntaRepository preguntaRepository;
+```
+
+`@Mock` indica que Mockito debe crear un objeto simulado para ese campo.
+
+Es equivalente, en cuanto a la creación del mock, a escribir:
+
+```java
+repository = mock(ExamenRepository.class);
+preguntaRepository = mock(PreguntaRepository.class);
+```
+
+La diferencia es que ahora no necesitas llamar manualmente a mock().
+
+Estos mocks siguen siendo configurables mediante when() y comprobables mediante verify().
+
+Por ejemplo:
+
+```java
+when(repository.findAll()).thenReturn(Datos.EXAMENES);
+
+verify(repository).findAll();
+```
+
+La anotación cambia la forma de crear el objeto, pero no cambia cómo funciona Mockito.
+## 5. ¿Qué hace `@InjectMocks`?
+
+```java
+@InjectMocks
+ExamenServiceImpl service;
+```
+
+Esta anotación indica a Mockito que prepare una instancia de ExamenServiceImpl e intente inyectarle los mocks disponibles.
+
+En nuestro caso, identifica los campos:
+
+```java
+@Mock
+ExamenRepository repository;
+
+@Mock
+PreguntaRepository preguntaRepository;
+```
+
+Y los utiliza para preparar el servicio.
+
+`@InjectMocks` ExamenServiceImpl service -> `@Mock` (ExamenRepository) && `@Mock` (PreguntaRepository)
+
+¿Por qué utilizamos la clase concreta y no la interfaz?
+Tu código dice:
+
+```java
+@InjectMocks
+ExamenServiceImpl service;
+```
+
+Y no:
+
+```java
+@InjectMocks
+ExamenService service;
+```
+
+Esto se debe a que Mockito necesita una clase concreta que pueda instanciar. Una interfaz no tiene constructor ni una implementación propia que Mockito pueda utilizar para crear el servicio real.
+
+Además, @InjectMocks no convierte el servicio en un mock. El servicio sigue ejecutando su código real; lo que se simula son sus dependencias.
+¿Cómo inyecta Mockito las dependencias?
+Mockito intenta resolver la inyección mediante tres mecanismos:
+1. Constructor: intenta utilizar un constructor apropiado, preferentemente el de mayor número de parámetros.
+2. Setters: si corresponde, intenta asignar mocks mediante métodos de acceso.
+3. Campos: puede intentar asignarlos directamente.
+   Estos mecanismos no garantizan que todas las dependencias queden correctamente inyectadas. Por eso es recomendable utilizar un constructor explícito y dependencias final.
+
+Para tu servicio:
+
+```java
+@RequiredArgsConstructor
+public class ExamenServiceImpl implements ExamenService {
+
+    private final ExamenRepository examenRepository;
+    private final PreguntaRepository preguntaRepository;
+
+    // Métodos del servicio...
+}
+```
+
+Lombok genera el constructor que recibe ambos repositorios, y Mockito puede utilizarlo para crear el servicio.
+## 6. ¿Para qué sirve MockitoAnnotations.openMocks(this)?
+   En tu código aparece esta instrucción comentada:
+
+```java
+MockitoAnnotations.openMocks(this);
+```
+
+Es otra forma de inicializar los campos anotados con @Mock y @InjectMocks.
+
+this hace referencia al objeto actual de la clase de prueba. Mockito lo inspecciona para encontrar las anotaciones.
+
+Sin embargo, hay una diferencia importante:
+
+| Con MockitoExtension |	Con openMocks(this) |
+--- | ---|
+Inicialización automática. |	Inicialización manual.
+Se registra con @ExtendWith. |	Se llama normalmente desde @BeforeEach.
+Integra funcionalidades adicionales de Mockito con JUnit 5. |	Devuelve un AutoCloseable que debe cerrarse al terminar.
+Recomendado para tus pruebas actuales. |	Útil cuando no se utiliza la extensión.
+
+Si eliges la alternativa manual, una implementación sería:
+
+```java
+private AutoCloseable mocks;
+
+@BeforeEach
+void setUp() {
+    mocks = MockitoAnnotations.openMocks(this);
+}
+
+@AfterEach
+void tearDown() throws Exception {
+    mocks.close();
+}
+```
+
+No necesitas combinar ambas opciones. Con @ExtendWith(MockitoExtension.class) puedes eliminar tu setUp() si solamente lo utilizabas para crear los mocks e inyectarlos.
+## 7. Ejemplo completo utilizando las anotaciones
+
+```java
+@ExtendWith(MockitoExtension.class)
+class ExamenServiceImplTest {
+
+    @Mock
+    ExamenRepository repository;
+
+    @Mock
+    PreguntaRepository preguntaRepository;
+
+    @InjectMocks
+    ExamenServiceImpl service;
+
+    @Test
+    void testPreguntasExamen() {
+
+        when(repository.findAll())
+                .thenReturn(Datos.EXAMENES);
+
+        when(preguntaRepository.findPreguntasPorExamenId(5L))
+                .thenReturn(Datos.PREGUNTAS);
+
+        Examen examen =
+                service.findExamenPorNombreConPreguntas("Matematicas");
+
+        assertNotNull(examen);
+
+        assertAll(
+            () -> assertEquals(5L, examen.getId()),
+            () -> assertEquals(5, examen.getPreguntas().size()),
+            () -> assertTrue(examen.getPreguntas().contains("aritmetica"))
+        );
+
+        verify(repository).findAll();
+        verify(preguntaRepository).findPreguntasPorExamenId(5L);
+    }
+}
+```
+
+Observa que seguimos utilizando when(), thenReturn(), assertAll() y verify() exactamente igual que antes.
+
+Lo único que cambió fue la preparación de los mocks y del servicio.
+## 8. Dependencia necesaria en Maven
+   Para utilizar MockitoExtension, necesitas la integración de Mockito con JUnit Jupiter:
+   
+```xml
+<dependency>
+    <groupId>org.mockito</groupId>
+    <artifactId>mockito-junit-jupiter</artifactId>
+    <scope>test</scope>
+</dependency>
+```
+
+La versión debe estar definida explícitamente o administrada por tu proyecto, por ejemplo mediante un BOM o dependencyManagement.
+## 9. Acordeón rápido
+
+Anotación o método |	Función
+--- | ---
+@ExtendWith(MockitoExtension.class) |	Activa la integración entre JUnit 5 y Mockito.
+@Mock |	Crea una dependencia simulada.
+@InjectMocks |	Prepara el objeto real que queremos probar e intenta inyectarle los mocks.
+@BeforeEach |	Ejecuta código de preparación antes de cada test.
+MockitoAnnotations.openMocks(this) |	Inicializa manualmente las anotaciones de Mockito.
+when().thenReturn() |	Configura las respuestas simuladas.
+verify() |	Comprueba las llamadas realizadas a los mocks.
+
+La idea que debes memorizar:
+
+@Mock crea los colaboradores falsos, @InjectMocks los coloca en la clase real que estamos probando y @ExtendWith(MockitoExtension.class) permite que JUnit 5 administre esa preparación automáticamente.
+
+Esta combinación es muy utilizada en pruebas unitarias de servicios Java, incluyendo proyectos con Spring Boot, porque permite probar la lógica del servicio sin levantar un contexto completo de Spring.
+
+No pude generar el archivo .md descargable en esta ocasión. La explicación queda aquí organizada para que puedas copiarla a tus apuntes.
+
