@@ -200,3 +200,203 @@ verify(repo).findAll();                                // Verificar interacción
 ```
 
 **Regla para recordar:** Mockito prepara el escenario; el servicio actúa; JUnit comprueba el resultado.
+
+# 2. Agregando nuevas dependencias Mock y probándolas
+
+## Idea principal
+
+Mockito permite simular **varias dependencias** de un servicio real. En este ejemplo, `ExamenServiceImpl` utiliza dos repositorios: `ExamenRepository` para buscar exámenes y `PreguntaRepository` para consultar sus preguntas. Los repositorios se sustituyen por mocks, mientras que la lógica del servicio se ejecuta realmente.
+
+## Estructura
+
+- `Examen`: modelo con `Long id`, `String nombre`, `List<String> preguntas`. Lombok `@Getter`/`@Setter` genera accesores; el constructor inicializa `preguntas` como `ArrayList` vacía.
+- `ExamenRepository`: interfaz con `List<Examen> findAll()`.
+- `PreguntaRepository`: interfaz con `List<String> findPreguntasPorExamenId(Long id)`.
+- `ExamenService`: interfaz con `Optional<Examen> findExamenPorNombre(String nombre)` y `Examen findExamenPorNombreConPreguntas(String nombre)`.
+- `ExamenServiceImpl`: implementación real que coordina ambos repositorios.
+- `Datos`: clase de apoyo con exámenes y preguntas ficticios.
+- `ExamenServiceImplTest`: pruebas JUnit 5 con Mockito.
+
+## Flujo del método nuevo
+
+```java
+@Override
+public Examen findExamenPorNombreConPreguntas(String nombre) {
+    Optional<Examen> examenOptional = findExamenPorNombre(nombre);
+    Examen examen = null;
+    if (examenOptional.isPresent()) {
+        examen = examenOptional.orElseThrow();
+        List<String> preguntas = preguntaRepository.findPreguntasPorExamenId(examen.getId());
+        examen.setPreguntas(preguntas);
+    }
+    return examen;
+}
+```
+
+1. `findExamenPorNombre` consulta `examenRepository.findAll()` y usa `stream()`, `filter()` y `findFirst()`.
+2. `isPresent()` comprueba si existe un examen.
+3. `orElseThrow()` extrae el examen del `Optional`.
+4. `getId()` obtiene su identificador.
+5. `findPreguntasPorExamenId(id)` consulta el segundo repositorio.
+6. `setPreguntas()` agrega las preguntas al objeto y devuelve el examen.
+7. Si no existe, devuelve `null` y **no llama** al repositorio de preguntas.
+
+## Crear mocks e inyectarlos con `@BeforeEach`
+
+```java
+private ExamenRepository repository;
+private PreguntaRepository preguntaRepository;
+private ExamenService service;
+
+@BeforeEach
+void setUp() {
+    repository = mock(ExamenRepository.class);
+    preguntaRepository = mock(PreguntaRepository.class);
+    service = new ExamenServiceImpl(repository, preguntaRepository);
+}
+```
+
+- `mock(Interfaz.class)` crea un doble de prueba del tipo indicado.
+- `new ExamenServiceImpl(...)` construye el **servicio real** e inyecta los mocks por constructor.
+- `@BeforeEach` crea mocks nuevos antes de cada prueba; evita que se compartan configuraciones e interacciones.
+
+## Configurar ambos mocks con `when().thenReturn()`
+
+```java
+when(repository.findAll()).thenReturn(Datos.EXAMENES);
+when(preguntaRepository.findPreguntasPorExamenId(5L))
+        .thenReturn(Datos.PREGUNTAS);
+```
+
+- La primera línea indica que `findAll()` debe devolver tres exámenes.
+- La segunda devuelve cinco preguntas **solo si se solicita el ID `5L`**.
+- `when(...)` identifica la llamada a simular; `thenReturn(...)` establece la respuesta.
+
+## `anyLong()` y coincidencia de argumentos
+
+```java
+when(preguntaRepository.findPreguntasPorExamenId(anyLong()))
+        .thenReturn(Datos.PREGUNTAS);
+```
+
+`anyLong()` es un **argument matcher**: coincide con cualquier argumento de tipo `long` o `Long` no nulo, en lugar de exigir un identificador concreto. **No significa “cualquier tipo de dato”**. Para validar la relación entre examen y preguntas, suele ser mejor usar `eq(5L)` o el literal `5L`, ya que detecta IDs incorrectos.
+
+## Test completo de búsqueda con preguntas
+
+```java
+@Test
+void testPreguntasExamen() {
+    when(repository.findAll()).thenReturn(List.of(
+        new Examen(5L, "Matematicas"),
+        new Examen(6L, "Lenguaje"),
+        new Examen(7L, "Historia")
+    ));
+    when(preguntaRepository.findPreguntasPorExamenId(5L))
+        .thenReturn(List.of("aritmetica", "integrales", "derivadas", "trigonometria", "geometria"));
+
+    Examen examen = service.findExamenPorNombreConPreguntas("Matematicas");
+
+    assertNotNull(examen);
+    assertAll("Examen con preguntas",
+        () -> assertEquals(5L, examen.getId()),
+        () -> assertEquals("Matematicas", examen.getNombre()),
+        () -> assertEquals(5, examen.getPreguntas().size()),
+        () -> assertTrue(examen.getPreguntas().contains("aritmetica"))
+    );
+
+    verify(repository).findAll();
+    verify(preguntaRepository).findPreguntasPorExamenId(5L);
+}
+```
+
+**Por qué comprobar `assertNotNull(examen)` primero:** el servicio puede devolver `null`. Si es `null`, llamar a `getPreguntas()` provocaría `NullPointerException`.
+
+## Probar lista vacía y examen inexistente
+
+```java
+@Test
+void testSinExamenes() {
+    when(repository.findAll()).thenReturn(Collections.emptyList());
+    Optional<Examen> resultado = service.findExamenPorNombre("Matematicas");
+    assertTrue(resultado.isEmpty());
+    verify(repository).findAll();
+    verifyNoInteractions(preguntaRepository);
+}
+
+@Test
+void testSinExamenNoConsultaPreguntas() {
+    when(repository.findAll()).thenReturn(Collections.emptyList());
+    Examen resultado = service.findExamenPorNombreConPreguntas("Matematicas");
+    assertNull(resultado);
+    verify(repository).findAll();
+    verifyNoInteractions(preguntaRepository);
+}
+```
+
+`Collections.emptyList()` crea una lista vacía. `verifyNoInteractions(...)` comprueba que el mock de preguntas no fue utilizado.
+
+## `verify()` frente a `assert...`
+
+- `assertEquals`, `assertTrue`, `assertNotNull` y `assertNull` son **aserciones de JUnit** que verifican resultados.
+- `verify(mock).metodo(...)` es de **Mockito** y verifica llamadas.
+- `verify(mock, times(1))` comprueba una llamada; una llamada es el valor predeterminado de `verify(mock)`.
+- `verifyNoInteractions(mock)` comprueba que no hubo interacciones.
+
+## Precaución con la clase `Datos`
+
+```java
+public static final List<Examen> EXAMENES = Arrays.asList(...);
+```
+
+`static final` evita reasignar la referencia, **pero no vuelve inmutables los objetos `Examen`**. Como `findExamenPorNombreConPreguntas` modifica el examen con `setPreguntas`, una prueba puede afectar a otras si comparten instancias. Conviene crear nuevos objetos en cada prueba o usar un método fábrica:
+
+```java
+public static List<Examen> crearExamenes() {
+    return List.of(
+        new Examen(5L, "Matematicas"),
+        new Examen(6L, "Lenguaje"),
+        new Examen(7L, "Historia")
+    );
+}
+```
+
+Cada llamada crea nuevos exámenes, aunque la lista devuelta no permita agregar o quitar elementos.
+
+## Lombok y diseño
+
+En la clase original, `@RequiredArgsConstructor` y `@AllArgsConstructor` aparecen juntos. Dado que los campos no son `final` ni `@NonNull`, `@RequiredArgsConstructor` genera un constructor sin argumentos, mientras que `@AllArgsConstructor` genera el constructor con ambos repositorios. Una opción más clara es:
+
+```java
+@RequiredArgsConstructor
+public class ExamenServiceImpl implements ExamenService {
+    private final ExamenRepository examenRepository;
+    private final PreguntaRepository preguntaRepository;
+    // métodos de negocio...
+}
+```
+
+Así Lombok genera el constructor con ambas dependencias obligatorias.
+
+## Tips y errores comunes
+
+1. **Simula las dependencias, no el servicio que deseas probar.**
+2. **`anyLong()` acepta IDs de tipo `long`/`Long` no nulos, no cualquier tipo de dato.**
+3. Prefiere configurar el ID específico `5L` cuando sea importante verificar la relación correcta.
+4. Comprueba tanto el contenido del examen como las interacciones necesarias con los repositorios.
+5. Incluye casos sin resultados y verifica que no se consulten preguntas innecesariamente.
+6. Evita compartir objetos mutables entre pruebas mediante constantes `static final`.
+7. Considera devolver `Optional<Examen>` también en `findExamenPorNombreConPreguntas` para evitar `null` (mejora de diseño opcional, no parte del código actual).
+
+## Importaciones principales
+
+```java
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+```
+
+**Resumen:** el servicio es real, los dos repositorios son mocks; `when(...).thenReturn(...)` prepara las respuestas, JUnit verifica resultados y `verify()` comprueba las interacciones.

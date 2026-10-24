@@ -3,6 +3,8 @@ package org.gerardo.appmockito.ejemplo.services;
 import org.gerardo.appmockito.ejemplo.models.Examen;
 import org.gerardo.appmockito.ejemplo.repositories.ExamenRepository;
 import org.gerardo.appmockito.ejemplo.repositories.ExamenRepositoryImpl;
+import org.gerardo.appmockito.ejemplo.repositories.PreguntaRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import static org.mockito.Mockito.*;
 
@@ -15,23 +17,30 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ExamenServiceImplTest {
 
+    ExamenRepository repository;
+    ExamenService service;
+    PreguntaRepository preguntaRepository;
+
+    @BeforeEach
+    void setUp() {
+        // 1. Crear el repositorio simulado.
+        repository = mock(ExamenRepository.class);
+        preguntaRepository = mock(PreguntaRepository.class);
+
+                // 2. Crear el servicio REAL e inyectarle el mock.
+        service = new ExamenServiceImpl(repository,preguntaRepository);
+
+    }
+
     @Test
     void findExamenPorNombre() {
-        // 1. Crear el repositorio simulado.
-        ExamenRepository repository = mock(ExamenRepository.class);
 
-        // 2. Crear el servicio REAL e inyectarle el mock.
-        ExamenService service = new ExamenServiceImpl(repository);
 
         // 3. Preparar datos de prueba.
-        List<Examen> datos = Arrays.asList(
-                new Examen(5L, "Matematicas"),
-                new Examen(6L, "Lenguaje"),
-                new Examen(7L, "Historia")
-        );
+        // Usamos la clase DATOS
 
         // 4. Configurar la respuesta del mock.
-        when(repository.findAll()).thenReturn(datos);
+        when(repository.findAll()).thenReturn(Datos.EXAMENES);
 
         // 5. Ejecutar el método REAL del servicio.
         Optional<Examen> examen = service.findExamenPorNombre("Matematicas");
@@ -51,10 +60,6 @@ class ExamenServiceImplTest {
     @Test
     void findExamenPorNombreListaVacia(){
 
-        ExamenRepository repository = mock(ExamenRepository.class);
-
-        ExamenService service = new ExamenServiceImpl(repository);
-
         List<Examen> datos = Collections.emptyList();
 
         when(repository.findAll()).thenReturn(datos);
@@ -63,12 +68,21 @@ class ExamenServiceImplTest {
 
 
         assertAll("Buscar examen por atributos, lista vacia",
-                () -> assertTrue(examen.isPresent()),
-                ()-> assertEquals(5L, examen.orElseThrow().getId()),
-                () -> assertEquals("Matematicas", examen.orElseThrow().getNombre())
+                () -> assertFalse(examen.isPresent())
+
         );
-
-//        assertNotNull(examen);
-
     }
+
+    @Test
+    void testPreguntasExamen(){
+        when(repository.findAll()).thenReturn(Datos.EXAMENES);
+        // le indicamos que solo cuando invoque con el agumento 5 tendremos las preguntas (match arguments)
+        // agregamos anyLong() para que acepte cualquier tipo de dato
+        when(preguntaRepository.findPreguntasPorExamenId(anyLong())).thenReturn(Datos.PREGUNTAS);
+
+        Examen examen = service.findExamenPorNombreConPreguntas("Matematicas");
+        assertEquals(5, examen.getPreguntas().size());
+        assertTrue(examen.getPreguntas().contains("aritmetica"));
+    }
+
 }
