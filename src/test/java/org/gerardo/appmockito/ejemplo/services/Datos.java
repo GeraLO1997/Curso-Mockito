@@ -20,5 +20,5 @@ public class Datos {
             "geometria"
     );
 
-    public final static Examen EXAMEN = new Examen(8L, "Fisica");
+    public final static Examen EXAMEN = new Examen(null, "Fisica");
 }

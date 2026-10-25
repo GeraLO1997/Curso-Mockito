@@ -808,151 +808,258 @@ Esta combinación es muy utilizada en pruebas unitarias de servicios Java, inclu
 
 No pude generar el archivo .md descargable en esta ocasión. La explicación queda aquí organizada para que puedas copiarla a tus apuntes.
 
-# 5. Probando el método guardar() con Mockito
+# 5. Mockito: probando `guardar()` con la clase `Datos`
 
-## Objetivo
-
-Probar la lógica real de `ExamenServiceImpl.guardar(Examen)` aislando sus dos dependencias con Mockito. El servicio guarda preguntas **solo si la lista no está vacía** y después guarda el examen.
+## Clase `Datos` utilizada
 
 ```java
-@Override
-public Examen guardar(Examen examen) {
-    if (!examen.getPreguntas().isEmpty()) {
-        preguntaRepository.guardarVarias(examen.getPreguntas());
-    }
-    return examenRepository.guardar(examen);
+public class Datos {
+    public static final List<Examen> EXAMENES = Arrays.asList(
+        new Examen(5L, "Matematicas"),
+        new Examen(6L, "Lenguaje"),
+        new Examen(7L, "Historia")
+    );
+    public static final List<String> PREGUNTAS = Arrays.asList(
+        "aritmetica", "integrales", "derivadas", "trigonometria", "geometria"
+    );
+    public static final Examen EXAMEN = new Examen(8L, "Fisica");
 }
 ```
 
-## Interfaces implicadas
+## ¿Qué hace `when(repository.guardar(any(Examen.class))).thenReturn(Datos.EXAMEN)`?
 
-```java
-public interface ExamenRepository {
-    Examen guardar(Examen examen);
-    List<Examen> findAll();
-}
+- `repository` es el mock de `ExamenRepository`.
+- `guardar(...)` es el método cuya respuesta configuramos.
+- `any(Examen.class)` coincide con cualquier argumento no nulo compatible con `Examen`.
+- `when(...)` selecciona la invocación que se simulará.
+- `thenReturn(Datos.EXAMEN)` hace que el mock devuelva la referencia al examen de Física (ID `8L`) definida en `Datos`, sin guardar realmente en base de datos.
 
-public interface PreguntaRepository {
-    void guardarVarias(List<String> preguntas);
-    List<String> findPreguntasPorExamenId(Long id);
-}
-```
-
-`ExamenRepository.guardar()` devuelve un `Examen`; `PreguntaRepository.guardarVarias()` es `void`, por lo que no devuelve valor.
-
-## Entender `when(repository.guardar(any(Examen.class))).thenReturn(Datos.EXAMEN)`
-
-1. `repository` es el mock de `ExamenRepository`.
-2. `guardar(...)` es la llamada que queremos simular.
-3. `any(Examen.class)` es un *argument matcher*: coincide con cualquier instancia no nula compatible con `Examen`.
-4. `when(...)` inicia la configuración (*stubbing*) de la llamada.
-5. `thenReturn(Datos.EXAMEN)` define el objeto devuelto por el mock cuando recibe una llamada coincidente.
-
-```java
-when(repository.guardar(any(Examen.class)))
-        .thenReturn(new Examen(8L, "Fisica"));
-```
-
-**No se guarda realmente nada en una base de datos.** El mock simplemente devuelve el objeto configurado. Incluso si recibe un examen distinto, devolverá el objeto fijado en `thenReturn`.
-
-## Preparación con anotaciones
-
-```java
-@ExtendWith(MockitoExtension.class)
-class ExamenServiceImplTest {
-    @Mock ExamenRepository repository;
-    @Mock PreguntaRepository preguntaRepository;
-    @InjectMocks ExamenServiceImpl service;
-}
-```
-
-- `@ExtendWith(MockitoExtension.class)` activa la integración de Mockito con JUnit Jupiter.
-- `@Mock` crea dependencias simuladas.
-- `@InjectMocks` crea/prepara el servicio real e intenta inyectarle los mocks.
-
-Se recomienda usar inyección por constructor y atributos `final` en `ExamenServiceImpl`.
-
-## Prueba 1: guardar un examen sin preguntas
+## `testGuardarExamen`: examen sin preguntas
 
 ```java
 @Test
-@DisplayName("Guardar examen sin preguntas")
-void testGuardarExamenSinPreguntas() {
-    Examen entrada = new Examen(null, "Fisica");
-    Examen guardado = new Examen(8L, "Fisica");
+@DisplayName("Guardar Examen")
+void testGuardarExamen() {
+    when(repository.guardar(any(Examen.class))).thenReturn(Datos.EXAMEN);
 
-    when(repository.guardar(same(entrada))).thenReturn(guardado);
+    Examen examen = service.guardar(Datos.EXAMEN);
+    assertNotNull(examen.getId());
+    assertEquals(8L, examen.getId());
+    assertEquals("Fisica", examen.getNombre());
 
-    Examen resultado = service.guardar(entrada);
+    verify(repository).guardar(any(Examen.class));
+    // Corrección respecto al ejemplo original:
+    verify(preguntaRepository, never()).guardarVarias(anyList());
+}
+```
 
-    assertNotNull(resultado);
-    assertEquals(8L, resultado.getId());
-    assertEquals("Fisica", resultado.getNombre());
+**Flujo:** el examen recién creado tiene preguntas vacías; `service.guardar()` omite `preguntaRepository.guardarVarias()`, llama a `examenRepository.guardar(examen)` y recibe `Datos.EXAMEN` por la configuración de `when`. `verify(repository)` confirma una llamada. La verificación original `verify(preguntaRepository).guardarVarias(anyList())` sería incorrecta para este caso: debe ser `never()` o `verifyNoInteractions(preguntaRepository)`.
 
-    verify(repository).guardar(same(entrada));
+## `testGuardarExamenConPreguntas`
+
+```java
+@Test
+@DisplayName("Guardar Examen con preguntas")
+void testGuardarExamenConPeguntas() {
+    Examen newExamen = Datos.EXAMEN;
+    newExamen.setPreguntas(Datos.PREGUNTAS);
+
+    when(repository.guardar(any(Examen.class))).thenReturn(Datos.EXAMEN);
+
+    Examen examen = service.guardar(newExamen);
+    assertNotNull(examen.getId());
+    assertEquals(8L, examen.getId());
+    assertEquals("Fisica", examen.getNombre());
+
+    verify(repository).guardar(any(Examen.class));
+    verify(preguntaRepository).guardarVarias(anyList());
+}
+```
+
+**Flujo:** se asignan cinco preguntas a `Datos.EXAMEN`. Al ejecutar el servicio, el `if (!examen.getPreguntas().isEmpty())` es verdadero y se llama al mock `preguntaRepository.guardarVarias(...)`. Como el método devuelve `void`, el mock no hace nada por defecto; sí registra la llamada para `verify`. Luego se llama al mock `repository.guardar(...)`, que devuelve `Datos.EXAMEN` por `thenReturn`. Las aserciones comprueban ID y nombre; los `verify` comprueban ambas llamadas.
+
+## Advertencia importante: estado compartido
+
+`Examen newExamen = Datos.EXAMEN` **no copia** el objeto. Ambas referencias apuntan al mismo examen estático. `setPreguntas(Datos.PREGUNTAS)` modifica ese objeto compartido, de modo que la primera prueba podría encontrar preguntas si se ejecuta después de la segunda. `@BeforeEach` que reinicia mocks no reinicia `Datos.EXAMEN`.
+
+Para conservar la misma clase `Datos` y evitar contaminación entre pruebas, se puede crear una copia a partir de sus atributos:
+
+```java
+Examen nuevo = new Examen(Datos.EXAMEN.getId(), Datos.EXAMEN.getNombre());
+// Solo para el test con preguntas:
+nuevo.setPreguntas(Datos.PREGUNTAS);
+```
+
+Así ambos tests usan los valores de `Datos` pero trabajan con instancias independientes.
+
+## Diferencia entre las verificaciones
+
+- `verify(repository).guardar(any(Examen.class))`: confirma que se llamó una vez a `guardar` con un examen no nulo.
+- `verify(preguntaRepository).guardarVarias(anyList())`: confirma una llamada con una lista no nula, pero no comprueba su contenido.
+- `verify(preguntaRepository, never()).guardarVarias(anyList())`: confirma que no se llamó a ese método con una lista coincidente.
+- `verifyNoInteractions(preguntaRepository)`: confirma que no hubo ninguna interacción con ese mock.
+
+**Regla:** `when()` configura la respuesta; `service.guardar()` ejecuta la lógica real; `assert` valida el resultado y `verify()` comprueba las interacciones.
+
+
+# 6. Test del ID incremental con Mockito: Answer e InvocationOnMock
+
+## Objetivo
+Simular que `ExamenRepository.guardar(Examen)` asigna IDs incrementales a los exámenes, sin utilizar una base de datos real. Se mantiene la clase `Datos` del curso:
+
+```java
+public class Datos {
+    public static final List<Examen> EXAMENES = Arrays.asList(
+        new Examen(5L, "Matematicas"),
+        new Examen(6L, "Lenguaje"),
+        new Examen(7L, "Historia")
+    );
+    public static final List<String> PREGUNTAS = Arrays.asList(
+        "aritmetica", "integrales", "derivadas", "trigonometria", "geometria"
+    );
+    public static final Examen EXAMEN = new Examen(null, "Fisica");
+}
+```
+
+## Código original explicado
+
+```java
+when(repository.guardar(any(Examen.class))).then(new Answer<Examen>() {
+    Long secuencia = 8L;
+
+    @Override
+    public Examen answer(InvocationOnMock invocation) throws Throwable {
+        Examen examen = invocation.getArgument(0);
+        examen.setId(secuencia++);
+        return examen;
+    }
+});
+```
+
+- `repository` es el mock de `ExamenRepository`.
+- `guardar(Examen)` es el método del mock que configuramos.
+- `any(Examen.class)` coincide con cualquier instancia no nula de `Examen`.
+- `when(...)` comienza la configuración de la llamada simulada.
+- `then(Answer<Examen>)` define una **respuesta dinámica**. A diferencia de `thenReturn(objeto)`, permite ejecutar código cada vez que se invoca el método.
+- `Answer<Examen>` es una **interfaz genérica de Mockito**; el parámetro `Examen` determina el tipo de retorno de `answer()`.
+- `new Answer<Examen>() { ... }` es una **clase anónima** que implementa esa interfaz.
+- `Long secuencia = 8L` es un campo de esa instancia anónima; empieza en 8 y conserva su valor para las llamadas sucesivas que utilicen ese mismo `Answer`.
+- `@Override` señala la implementación del método de la interfaz.
+- `answer(InvocationOnMock invocation)` se ejecuta cuando el mock recibe una llamada coincidente. `InvocationOnMock` representa la invocación y permite consultar sus argumentos.
+- `throws Throwable` es parte de la firma de `Answer.answer`; este ejemplo no lanza ninguna excepción.
+- `invocation.getArgument(0)` extrae el **primer argumento** (los índices empiezan en cero) pasado a `repository.guardar(...)` y lo trata como `Examen`.
+- `examen.setId(secuencia++)` asigna el ID actual y después incrementa `secuencia` (postincremento). Primera llamada: ID 8; segunda: 9; tercera: 10.
+- `return examen` devuelve **el mismo objeto recibido**, ahora modificado, no una copia.
+
+## Flujo de la prueba del curso
+
+```java
+@Test
+@DisplayName("Guardar Examen con preguntas")
+void testGuardarExamenConPeguntas() {
+    // Given
+    Examen newExamen = Datos.EXAMEN;
+    newExamen.setPreguntas(Datos.PREGUNTAS);
+
+    when(repository.guardar(any(Examen.class))).then(new Answer<Examen>() {
+        Long secuencia = 8L;
+
+        @Override
+        public Examen answer(InvocationOnMock invocation) throws Throwable {
+            Examen examen = invocation.getArgument(0);
+            examen.setId(secuencia++);
+            return examen;
+        }
+    });
+
+    // When
+    Examen examen = service.guardar(newExamen);
+
+    // Then
+    assertNotNull(examen.getId());
+    assertEquals(8L, examen.getId());
+    assertEquals("Fisica", examen.getNombre());
+    verify(repository).guardar(any(Examen.class));
+    verify(preguntaRepository).guardarVarias(anyList());
+}
+```
+
+1. `Datos.EXAMEN` comienza con ID `null` y nombre `Fisica`.
+2. `setPreguntas(Datos.PREGUNTAS)` agrega cinco preguntas al mismo objeto.
+3. `service.guardar(newExamen)` invoca `preguntaRepository.guardarVarias(...)` porque hay preguntas; al ser un método `void` en un mock, no hace nada por defecto.
+4. El servicio llama a `examenRepository.guardar(examen)`; Mockito ejecuta `answer()`.
+5. `getArgument(0)` obtiene el examen recibido; `setId(8L)` asigna el ID; `return examen` lo devuelve.
+6. JUnit verifica ID y nombre; Mockito verifica ambas llamadas.
+
+**Limitación:** el test del curso solo guarda **una vez**. Comprueba que se asigna el ID 8, pero no comprueba que el contador incremente en llamadas sucesivas.
+
+## Prueba adicional: comprobar el incremento real
+
+```java
+@Test
+void testIdsIncrementales() {
+    when(repository.guardar(any(Examen.class))).then(new Answer<Examen>() {
+        long secuencia = 8L;
+
+        @Override
+        public Examen answer(InvocationOnMock invocation) {
+            Examen examen = invocation.getArgument(0);
+            examen.setId(secuencia++);
+            return examen;
+        }
+    });
+
+    Examen fisica = new Examen(null, Datos.EXAMEN.getNombre());
+    Examen quimica = new Examen(null, "Quimica");
+    Examen biologia = new Examen(null, "Biologia");
+
+    assertEquals(8L, service.guardar(fisica).getId());
+    assertEquals(9L, service.guardar(quimica).getId());
+    assertEquals(10L, service.guardar(biologia).getId());
+
+    verify(repository, times(3)).guardar(any(Examen.class));
     verifyNoInteractions(preguntaRepository);
 }
 ```
 
-`same(entrada)` comprueba identidad de referencia: el servicio entrega al repositorio exactamente ese objeto. `verifyNoInteractions` comprueba que no se llamó a ningún método del repositorio de preguntas.
+Este test utiliza objetos nuevos con listas de preguntas vacías y demuestra el incremento dentro de **la misma configuración del mock**. No persiste datos entre pruebas.
 
-## Prueba 2: guardar un examen con preguntas
+## Forma corta con lambda
 
-```java
-@Test
-@DisplayName("Guardar examen con preguntas")
-void testGuardarExamenConPreguntas() {
-    Examen entrada = new Examen(null, "Fisica");
-    entrada.setPreguntas(List.of("Movimiento", "Energia"));
-    Examen guardado = new Examen(8L, "Fisica");
-
-    when(repository.guardar(same(entrada))).thenReturn(guardado);
-
-    Examen resultado = service.guardar(entrada);
-
-    assertNotNull(resultado);
-    assertEquals(8L, resultado.getId());
-    assertEquals("Fisica", resultado.getNombre());
-
-    verify(preguntaRepository).guardarVarias(entrada.getPreguntas());
-    verify(repository).guardar(same(entrada));
-}
-```
-
-El método `guardarVarias` es `void`: por defecto, un mock no hace nada cuando se invoca. No hace falta `when(...).thenReturn(...)`; basta con verificar la llamada.
-
-## `anyList()` y verificación de argumentos
+Como `Answer<T>` es una interfaz funcional, se puede escribir:
 
 ```java
-verify(preguntaRepository).guardarVarias(anyList());
+AtomicLong secuencia = new AtomicLong(8L);
+when(repository.guardar(any(Examen.class))).thenAnswer(invocation -> {
+    Examen examen = invocation.getArgument(0);
+    examen.setId(secuencia.getAndIncrement());
+    return examen;
+});
 ```
 
-`anyList()` acepta cualquier lista no nula. Comprueba que se pasó una lista, **pero no comprueba su contenido**. Para validar el contenido, usa una lista esperada, `eq(...)` o `ArgumentCaptor` (tema posterior):
+`thenAnswer(...)` es una forma expresiva de registrar la respuesta. `AtomicLong.getAndIncrement()` devuelve el valor actual y después lo incrementa. Aquí se usa para disponer de un contador mutable capturado por la lambda; no implica que el mock simule una base de datos real.
 
-```java
-verify(preguntaRepository).guardarVarias(
-    List.of("Movimiento", "Energia")
-);
-```
+## Buenas prácticas
 
-## Errores importantes en los ejemplos originales
-
-1. En la prueba **sin preguntas**, `verify(preguntaRepository).guardarVarias(anyList())` es incorrecto: el servicio no invoca ese método. Debe utilizarse `never()` o `verifyNoInteractions(preguntaRepository)`.
-2. `Datos.EXAMEN` es un objeto `static final`, **no inmutable**. Hacer `newExamen = Datos.EXAMEN` y después `setPreguntas(...)` modifica el mismo objeto compartido. Las pruebas pueden influirse entre sí. Crea un `new Examen(...)` por test.
-3. Si configuras `thenReturn(Datos.EXAMEN)` y también envías `Datos.EXAMEN`, las aserciones de ID y nombre pueden pasar sin demostrar que se persistió nada. Un caso más realista usa un examen de entrada sin ID y otro devuelto con ID.
-4. `verify(repository).guardar(any(Examen.class))` no comprueba cuál examen se envió. Usa `same(entrada)`, `eq(entrada)` o un captor cuando sea relevante.
-5. La implementación actual guarda las preguntas **antes** de guardar el examen. En sistemas reales, puede ser necesario guardar primero el examen para obtener su ID y vincular las preguntas, además de gestionar transacciones. Aquí solo se prueba el comportamiento implementado.
+- **No reutilizar `Datos.EXAMEN` mutable entre pruebas:** es `static final`, pero el objeto puede modificarse mediante `setId()` y `setPreguntas()`. Para pruebas aisladas, crea `new Examen(null, Datos.EXAMEN.getNombre())`.
+- `any(Examen.class)` no coincide con `null`; usa el matcher apropiado si necesitas probar argumentos nulos.
+- `getArgument(0)` devuelve la referencia del argumento, por lo que `setId()` cambia el objeto que recibió el mock.
+- `verify(repository).guardar(...)` comprueba una interacción, no que los datos se hayan persistido.
+- Prueba por separado el primer ID y los incrementos posteriores.
+- `Answer` sirve para respuestas dinámicas dependientes de argumentos o estado; para una respuesta fija suele bastar `thenReturn()`.
 
 ## Resumen rápido
 
-| Herramienta | Función |
+| Elemento | Función |
 |---|---|
-| `when(...).thenReturn(...)` | Configura el valor que devolverá un método simulado. |
-| `any(Examen.class)` | Coincide con cualquier instancia no nula compatible con `Examen`. |
-| `anyList()` | Coincide con cualquier lista no nula. |
-| `same(objeto)` | Coincide con la misma referencia de objeto. |
-| `verify(mock).metodo()` | Comprueba que el método se llamó exactamente una vez. |
-| `verifyNoInteractions(mock)` | Comprueba que el mock no recibió llamadas. |
-| `never()` | Comprueba que una llamada específica no ocurrió. |
+| `when(...)` | Selecciona la llamada que queremos simular |
+| `any(Examen.class)` | Coincide con un `Examen` no nulo |
+| `then(new Answer<Examen>() {...})` | Registra comportamiento dinámico |
+| `answer(InvocationOnMock)` | Se ejecuta por cada invocación coincidente |
+| `getArgument(0)` | Recupera el primer argumento |
+| `secuencia++` | Asigna el valor actual y después incrementa |
+| `setId(...)` | Modifica el examen recibido |
+| `return examen` | Devuelve el examen modificado |
+| `verify(...)` | Verifica llamadas realizadas |
 
-**Regla:** Mockito simula la persistencia; JUnit valida el resultado; `verify` comprueba qué métodos fueron invocados y con qué argumentos.
+
