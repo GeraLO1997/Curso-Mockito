@@ -1063,3 +1063,127 @@ when(repository.guardar(any(Examen.class))).thenAnswer(invocation -> {
 | `verify(...)` | Verifica llamadas realizadas |
 
 
+# 7. Comprobaciones de excepciones con `when()` y `thenThrow()`
+
+## Objetivo
+Aprender a simular excepciones en repositorios con Mockito y verificarlas con JUnit 5, utilizando las listas reales de la clase `Datos`.
+
+## Clase `Datos`
+
+```java
+public class Datos {
+    public static final List<Examen> EXAMENES = Arrays.asList(
+        new Examen(5L, "Matematicas"),
+        new Examen(6L, "Lenguaje"),
+        new Examen(7L, "Historia")
+    );
+
+    public static final List<Examen> EXAMENES_ID_NULL = Arrays.asList(
+        new Examen(null, "Matematicas"),
+        new Examen(null, "Lenguaje"),
+        new Examen(null, "Historia")
+    );
+
+    public static final List<String> PREGUNTAS = Arrays.asList(
+        "aritmetica", "integrales", "derivadas", "trigonometria", "geometria"
+    );
+
+    public static final Examen EXAMEN = new Examen(null, "Fisica");
+}
+```
+
+## `thenReturn()` frente a `thenThrow()`
+
+```java
+when(repository.findAll()).thenReturn(Datos.EXAMENES);
+when(preguntaRepository.findPreguntasPorExamenId(anyLong()))
+    .thenThrow(IllegalArgumentException.class);
+```
+
+- `when(...)` configura el comportamiento de una llamada al **mock**.
+- `thenReturn(valor)` hace que el mock devuelva un valor.
+- `thenThrow(TipoExcepcion.class)` hace que el mock lance una excepción cuando la llamada coincida.
+- `IllegalArgumentException` es una excepción de Java que suele indicar argumentos inválidos.
+- `anyLong()` coincide con valores `long`/`Long` **no nulos**; no coincide con `null`.
+- `isNull()` coincide con un argumento `null`.
+
+## Prueba 1: examen con ID válido
+
+```java
+@Test
+void testManejoException() {
+    when(repository.findAll()).thenReturn(Datos.EXAMENES);
+    when(preguntaRepository.findPreguntasPorExamenId(anyLong()))
+        .thenThrow(IllegalArgumentException.class);
+
+    IllegalArgumentException exception = assertThrows(
+        IllegalArgumentException.class,
+        () -> service.findExamenPorNombreConPreguntas("Matematicas")
+    );
+
+    assertEquals(IllegalArgumentException.class, exception.getClass());
+    verify(repository).findAll();
+    verify(preguntaRepository).findPreguntasPorExamenId(anyLong());
+}
+```
+
+### Paso a paso
+
+1. `repository.findAll()` devuelve `Datos.EXAMENES`.
+2. El servicio encuentra Matemáticas, con ID `5L`.
+3. El servicio llama a `preguntaRepository.findPreguntasPorExamenId(5L)`.
+4. `anyLong()` coincide con `5L` y Mockito lanza `IllegalArgumentException`.
+5. `assertThrows()` de JUnit 5 ejecuta la lambda, comprueba la excepción y devuelve la excepción capturada.
+6. `verify()` confirma que los dos repositorios fueron consultados, incluso si el segundo lanzó una excepción.
+
+La comprobación `assertEquals(IllegalArgumentException.class, exception.getClass())` es redundante si basta con comprobar que la excepción es de un tipo compatible, porque `assertThrows()` ya lo hizo. `assertThrowsExactly()` exige la clase exacta.
+
+## Prueba 2: examen con ID nulo
+
+**Importante:** el código original carecía de `@Test`; sin esa anotación JUnit no lo ejecuta como prueba.
+
+```java
+@Test
+void testManejoExceptionNull() {
+    when(repository.findAll()).thenReturn(Datos.EXAMENES_ID_NULL);
+    when(preguntaRepository.findPreguntasPorExamenId(isNull()))
+        .thenThrow(IllegalArgumentException.class);
+
+    IllegalArgumentException exception = assertThrows(
+        IllegalArgumentException.class,
+        () -> service.findExamenPorNombreConPreguntas("Matematicas")
+    );
+
+    assertEquals(IllegalArgumentException.class, exception.getClass());
+    verify(repository).findAll();
+    verify(preguntaRepository).findPreguntasPorExamenId(isNull());
+}
+```
+
+### Paso a paso
+
+1. `repository.findAll()` devuelve exámenes cuyos IDs son `null`.
+2. El servicio encuentra Matemáticas, cuyo `getId()` devuelve `null`.
+3. El servicio llama a `findPreguntasPorExamenId(null)`.
+4. `isNull()` coincide y Mockito lanza `IllegalArgumentException`.
+5. JUnit comprueba la excepción; `verify(...isNull())` confirma el argumento recibido.
+
+La excepción no procede de una validación explícita del servicio: se produce porque el mock fue configurado para lanzarla.
+
+## Diferencia entre los comparadores
+
+| Matcher | `5L` | `null` |
+|---|---|---|
+| `anyLong()` | Coincide | No coincide |
+| `isNull()` | No coincide | Coincide |
+
+## Consejos
+
+- Para comprobar exactamente el ID consultado, utiliza `verify(preguntaRepository).findPreguntasPorExamenId(5L)` en la primera prueba.
+- `thenThrow()` configura errores de métodos con valor de retorno. Para un método `void`, utiliza `doThrow(...).when(mock).metodo(...)`.
+- `assertThrows()` pertenece a JUnit 5; `when()`, `thenThrow()`, `anyLong()`, `isNull()` y `verify()` pertenecen a Mockito.
+- En estos tests el servicio **propaga** la excepción porque no la captura con `try/catch`; no está resolviendo ni transformando el error.
+
+## Resumen
+
+`when()` prepara el escenario, `thenThrow()` simula el fallo, `assertThrows()` verifica la excepción y `verify()` confirma las llamadas que ocurrieron antes del fallo.
