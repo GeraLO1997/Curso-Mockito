@@ -1187,3 +1187,112 @@ La excepción no procede de una validación explícita del servicio: se produce 
 ## Resumen
 
 `when()` prepara el escenario, `thenThrow()` simula el fallo, `assertThrows()` verifica la excepción y `verify()` confirma las llamadas que ocurrieron antes del fallo.
+
+
+# Argument Matchers en Mockito
+
+## ¿Qué son?
+
+Los **Argument Matchers** son herramientas de Mockito para indicar qué argumentos aceptamos al configurar un mock con `when(...)` o qué argumentos esperamos al comprobar una llamada con `verify(...)`.
+
+**Analogía:** el mock es un empleado ficticio. `when(...).thenReturn(...)` le dice qué responder si recibe cierta solicitud; `verify(...)` comprueba qué solicitud recibió. Los matchers son las reglas para reconocerla: «cualquier número», «exactamente 5», «cualquier número mayor o igual a 5».
+
+## `anyLong()` al configurar una respuesta
+
+```java
+when(repository.findAll()).thenReturn(Datos.EXAMENES);
+when(preguntaRepository.findPreguntasPorExamenId(anyLong()))
+    .thenReturn(Datos.PREGUNTAS);
+```
+
+- `repository` y `preguntaRepository` son **mocks**: no consultan una base de datos.
+- `findAll()` devolverá la lista de exámenes creada en memoria.
+- `anyLong()` acepta cualquier valor de tipo `long` o `Long` **no nulo**; no significa que genere un ID.
+- `thenReturn(Datos.PREGUNTAS)` especifica la lista que devolverá el mock cuando se llame al método con un argumento compatible.
+
+## Ejecutar el servicio real
+
+```java
+service.findExamenPorNombreConPreguntas("Matematicas");
+```
+
+`service`, creado mediante `@InjectMocks`, es el objeto real que ejecuta su lógica. Supongamos que localiza el examen «Matematicas» con ID `5L` y llama a `preguntaRepository.findPreguntasPorExamenId(5L)`. Mockito no ejecuta la consulta del repositorio; devuelve `Datos.PREGUNTAS`.
+
+## `verify(...)` y `argThat(...)`
+
+```java
+verify(repository).findAll();
+verify(preguntaRepository)
+    .findPreguntasPorExamenId(argThat(arg -> arg != null && arg >= 5L));
+```
+
+- `verify(repository).findAll()` exige que `findAll()` se haya invocado exactamente una vez (es el valor predeterminado).
+- `argThat(...)` permite crear una **condición personalizada** sobre el argumento usado en la llamada real.
+- `arg -> arg != null && arg >= 5L` es una **expresión lambda** que devuelve `true` si el argumento no es nulo y es al menos 5.
+- Este `verify` acepta `5L`, `6L`, etc. Si el objetivo es comprobar el ID exacto, conviene usar `verify(preguntaRepository).findPreguntasPorExamenId(5L);` o `eq(5L)`.
+
+## Matcher con una clase anidada
+
+```java
+@Test
+void testArgumentMatchersClaseAnidada() {
+    when(repository.findAll()).thenReturn(Datos.EXAMENES);
+    when(preguntaRepository.findPreguntasPorExamenId(anyLong()))
+        .thenReturn(Datos.PREGUNTAS);
+
+    service.findExamenPorNombreConPreguntas("Matematicas");
+
+    verify(repository).findAll();
+    verify(preguntaRepository)
+        .findPreguntasPorExamenId(argThat(new MiArgsMatchers()));
+}
+
+public static class MiArgsMatchers implements ArgumentMatcher<Long> {
+    @Override
+    public boolean matches(Long argument) {
+        return argument != null && argument > 0;
+    }
+
+    @Override
+    public String toString() {
+        return "se esperaba un ID de examen positivo";
+    }
+}
+```
+
+- `ArgumentMatcher<Long>` es una **interfaz de Mockito** para crear reglas reutilizables que reciben un `Long`.
+- `matches(Long argument)` es el **método de la interfaz** que decide si un argumento coincide (`true`) o no (`false`).
+- `toString()` es un método heredado de `Object` que se sobrescribe para dar una descripción legible del matcher en determinados mensajes de error de Mockito.
+- `MiArgsMatchers` es una **clase anidada estática con nombre**, no una clase anónima. La lambda del ejemplo anterior tampoco es una clase anónima en el código fuente.
+- No hace falta guardar el argumento en un atributo de la clase para mostrar el requisito. Una descripción fija evita depender de cuándo Mockito llama a `matches()`.
+
+## Comparación rápida
+
+| Matcher | Significado |
+|---|---|
+| `anyLong()` | Cualquier `long` o `Long` no nulo |
+| `eq(5L)` | Exactamente `5L` |
+| `argThat(id -> id != null && id >= 5L)` | ID no nulo de al menos 5 |
+| `argThat(new MiArgsMatchers())` | Cumple la regla definida en `matches()` |
+
+**Atención:** `anyLong()` se usa arriba para **preparar** la respuesta del mock, mientras que `argThat(...)` se usa en `verify(...)` para **comprobar** qué argumento pasó realmente el servicio. Ambos pueden utilizarse en configuración o verificación.
+
+Si en una invocación a Mockito usas matchers para algunos argumentos, usa matchers para **todos** los argumentos de esa invocación (por ejemplo, `metodo(eq(5L), anyString())`).
+
+## Ejemplo de prueba más precisa
+
+```java
+@Test
+void debeBuscarPreguntasDelExamenMatematicas() {
+    when(repository.findAll()).thenReturn(Datos.EXAMENES);
+    when(preguntaRepository.findPreguntasPorExamenId(5L))
+        .thenReturn(Datos.PREGUNTAS);
+
+    service.findExamenPorNombreConPreguntas("Matematicas");
+
+    verify(repository).findAll();
+    verify(preguntaRepository).findPreguntasPorExamenId(5L);
+}
+```
+
+Esta prueba verifica el ID esperado de forma exacta, en lugar de aceptar cualquier ID positivo. Podrías añadir `assertEquals(...)` u otras assertions sobre las preguntas devueltas por el servicio.

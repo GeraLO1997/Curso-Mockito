@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentMatcher;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
@@ -204,6 +205,49 @@ class ExamenServiceImplTest {
 
         verify(repository).findAll();
         verify(preguntaRepository).findPreguntasPorExamenId(isNull());
+    }
+
+    // Implementando con clases anonimas
+    @Test
+    void testArgumentMatchers(){
+        when(repository.findAll()).thenReturn(Datos.EXAMENES);
+        when(preguntaRepository.findPreguntasPorExamenId(anyLong())).thenReturn(Datos.PREGUNTAS);
+
+        service.findExamenPorNombreConPreguntas("Matematicas");
+
+        verify(repository).findAll();
+//        verify(preguntaRepository).findPreguntasPorExamenId(argThat(arg -> arg != null && arg.equals(5L)));
+        verify(preguntaRepository).findPreguntasPorExamenId(argThat(arg -> arg != null && arg >= 5L));
+    }
+
+    @Test
+    void testArgumentMatchersClaseAnidada(){
+        when(repository.findAll()).thenReturn(Datos.EXAMENES_ID_NEGATIVOS);
+        when(preguntaRepository.findPreguntasPorExamenId(anyLong())).thenReturn(Datos.PREGUNTAS);
+
+        service.findExamenPorNombreConPreguntas("Matematicas");
+
+        verify(repository).findAll();
+        verify(preguntaRepository).findPreguntasPorExamenId(argThat(new MiArgsMatchers()));
+    }
+
+    // clase anidada (dentro de la clase test)
+    // La ventaja de esta forma es que podemos implementar el toString y escribir un mensaje
+    public static class MiArgsMatchers implements ArgumentMatcher<Long>{
+
+        private Long argument;
+
+        @Override
+        public boolean matches(Long argument) {
+            this.argument = argument;
+            return argument !=null && argument > 0;
+        }
+
+        @Override
+        public String toString() {
+            return "es para un mensaje personalizado de error que imprime mockito en caso de que falle el test " +
+                    + argument + " debe ser un entero positivo";
+        }
     }
 
 }
