@@ -1296,3 +1296,117 @@ void debeBuscarPreguntasDelExamenMatematicas() {
 ```
 
 Esta prueba verifica el ID esperado de forma exacta, en lugar de aceptar cualquier ID positivo. Podrías añadir `assertEquals(...)` u otras assertions sobre las preguntas devueltas por el servicio.
+
+
+# Capturando argumentos con ArgumentCaptor en Mockito
+
+## ¿Qué es `ArgumentCaptor`?
+
+`ArgumentCaptor<T>` es una clase de Mockito que permite **capturar el argumento que el código real envió a un método de un mock** y comprobarlo después mediante aserciones de JUnit 5.
+
+**Analogía:** imagina que el servicio entrega un sobre con el ID de un examen al repositorio. `ArgumentCaptor` toma una copia del número escrito en el sobre para que puedas revisarlo después.
+
+No simula una base de datos ni intercepta directamente un método real: captura el argumento de una **interacción registrada con un mock**, normalmente cuando se utiliza junto con `verify()`.
+
+## Tu ejemplo paso a paso
+
+```java
+@Test
+void testArgumentCapture() {
+    when(repository.findAll()).thenReturn(Datos.EXAMENES);
+
+    service.findExamenPorNombreConPreguntas("Matematicas");
+
+    ArgumentCaptor<Long> captor = ArgumentCaptor.forClass(Long.class);
+    verify(preguntaRepository).findPreguntasPorExamenId(captor.capture());
+
+    assertEquals(5L, captor.getValue());
+}
+```
+
+1. `when(repository.findAll()).thenReturn(Datos.EXAMENES)` prepara la lista de exámenes que devolverá el primer mock.
+2. `service.findExamenPorNombreConPreguntas("Matematicas")` ejecuta el **servicio real**. Si encuentra Matemáticas con ID `5L`, llama a `preguntaRepository.findPreguntasPorExamenId(5L)`.
+3. `ArgumentCaptor.forClass(Long.class)` crea un capturador de argumentos `Long`.
+4. `verify(preguntaRepository).findPreguntasPorExamenId(captor.capture())` comprueba que se invocó el método una vez y captura el ID enviado.
+5. `captor.getValue()` recupera el argumento capturado; `assertEquals(5L, ...)` valida que el servicio haya utilizado exactamente el ID esperado.
+
+**Nota:** la prueba supone que el servicio efectivamente llama al repositorio de preguntas. Si no lo hace, la verificación falla.
+
+## ¿Por qué funciona sin el `thenReturn()` del repositorio de preguntas?
+
+En tu prueba comentaste:
+
+```java
+// when(preguntaRepository.findPreguntasPorExamenId(anyLong()))
+//     .thenReturn(Datos.PREGUNTAS);
+```
+
+Para un mock normal de Mockito, una llamada no configurada que devuelve una `List` suele devolver una **lista vacía**, no `Datos.PREGUNTAS`. El servicio puede seguir ejecutándose si soporta esa respuesta. Aquí estás comprobando **qué ID envía el servicio**, no que se hayan cargado correctamente las preguntas. Si deseas verificar las preguntas del examen, también deberías configurar y comprobar la respuesta.
+
+## Alternativa con `@Captor`
+
+```java
+@ExtendWith(MockitoExtension.class)
+class ExamenServiceImplTest {
+
+    @Mock
+    ExamenRepository repository;
+
+    @Mock
+    PreguntaRepository preguntaRepository;
+
+    @InjectMocks
+    ExamenServiceImpl service;
+
+    @Captor
+    ArgumentCaptor<Long> captor;
+
+    @Test
+    void testArgumentCapture() {
+        when(repository.findAll()).thenReturn(Datos.EXAMENES);
+
+        service.findExamenPorNombreConPreguntas("Matematicas");
+
+        verify(preguntaRepository)
+            .findPreguntasPorExamenId(captor.capture());
+
+        assertEquals(5L, captor.getValue());
+    }
+}
+```
+
+`@Captor` hace que Mockito inicialice el capturador automáticamente mediante `MockitoExtension`. Es una alternativa a `ArgumentCaptor.forClass(Long.class)`; no necesitas ambas formas para el mismo capturador.
+
+## `ArgumentCaptor` vs. `argThat()`
+
+```java
+// Verifica directamente una condición sobre el argumento.
+verify(preguntaRepository)
+    .findPreguntasPorExamenId(argThat(id -> id != null && id > 0));
+
+// Captura el valor para inspeccionarlo con aserciones.
+verify(preguntaRepository)
+    .findPreguntasPorExamenId(captor.capture());
+assertEquals(5L, captor.getValue());
+```
+
+- **`argThat()`**: cuando basta con decidir si un argumento cumple una condición.
+- **`ArgumentCaptor`**: cuando necesitas inspeccionar el valor recibido o validar varias propiedades del objeto.
+- **`eq(5L)` o `5L`**: cuando simplemente quieres comprobar un valor exacto; suele ser lo más sencillo.
+
+## Métodos y anotaciones utilizados
+
+| Elemento | Función |
+|---|---|
+| `ArgumentCaptor<T>` | Capturador de argumentos del tipo `T`. |
+| `ArgumentCaptor.forClass(Long.class)` | Crea un capturador de `Long`. |
+| `@Captor` | Inicializa automáticamente un campo capturador con Mockito. |
+| `captor.capture()` | Indica qué argumento se captura durante `verify()`. |
+| `captor.getValue()` | Recupera el último argumento capturado. |
+| `captor.getAllValues()` | Recupera todos los argumentos capturados, útil para varias invocaciones. |
+| `verify(mock)` | Verifica una interacción, una vez por defecto. |
+| `assertEquals(esperado, real)` | Aserción de JUnit 5 para comparar el valor esperado con el recibido. |
+
+## Conclusión
+
+`ArgumentCaptor` permite confirmar **qué dato salió del servicio y llegó al repositorio simulado**. En este ejemplo, la prueba demuestra que al buscar "Matematicas" el servicio pidió preguntas con el ID `5L`, siempre que la llamada haya ocurrido como se esperaba.
