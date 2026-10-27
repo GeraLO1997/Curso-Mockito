@@ -1756,3 +1756,138 @@ Puede ser útil para verificar un método real y simular los demás de una clase
 **`doCallRealMethod()` le dice a un mock: «Para esta llamada, ejecuta el código real de este método».** Requiere un método con implementación real; no hace real al repositorio completo ni crea una base de datos.
 
 
+# Implementando espías con `@Spy` y `doReturn()` en Mockito
+
+## ¿Qué es un Spy?
+
+Un **Spy** de Mockito ejecuta los métodos reales por defecto, salvo que configuremos su comportamiento. Un **Mock**, en cambio, responde por defecto con valores de Mockito y no ejecuta la implementación real.
+
+**Analogía:** un mock es una calculadora de utilería; un spy es una calculadora funcional a la que podemos cambiarle el resultado de una operación específica.
+
+## Creación manual con `spy()`
+
+```java
+@Test
+void testSpy() {
+    ExamenRepository examenRepository = spy(ExamenRepositoryImpl.class);
+    PreguntaRepository preguntaRepository = spy(PreguntasRepositoryImpl.class);
+    ExamenService examenService = new ExamenServiceImpl(examenRepository, preguntaRepository);
+
+    List<String> preguntas = Arrays.asList("aritmetica");
+    doReturn(preguntas).when(preguntaRepository).findPreguntasPorExamenId(anyLong());
+
+    Examen examen = examenService.findExamenPorNombreConPreguntas("Matematicas");
+
+    assertEquals(5L, examen.getId());
+    assertEquals("Matematicas", examen.getNombre());
+    assertEquals(1, examen.getPreguntas().size());
+    assertTrue(examen.getPreguntas().contains("aritmetica"));
+
+    verify(examenRepository).findAll();
+    verify(preguntaRepository).findPreguntasPorExamenId(5L);
+}
+```
+
+1. `spy(ExamenRepositoryImpl.class)` crea un espía de la implementación concreta (Mockito debe poder construir la instancia). También existe `spy(new ExamenRepositoryImpl())`.
+2. `new ExamenServiceImpl(...)` crea el **servicio real** con los espías inyectados.
+3. `examenRepository.findAll()` ejecuta su implementación real y devuelve `Datos.EXAMENES`.
+4. `doReturn(preguntas).when(preguntaRepository).findPreguntasPorExamenId(anyLong())` reemplaza **solo ese método**, que devolverá `["aritmetica"]` para los argumentos que coincidan.
+5. Las aserciones de JUnit comprueban el examen y sus preguntas; `verify()` comprueba las interacciones. Usar `5L` en vez de `anyLong()` permite comprobar el ID exacto.
+
+## ¿Por qué `doReturn()` en lugar de `when().thenReturn()`?
+
+En un espía, configurar:
+
+```java
+when(preguntaRepository.findPreguntasPorExamenId(anyLong()))
+    .thenReturn(preguntas);
+```
+
+**Puede ejecutar el método real en el momento de configurar el stubbing.** Esto importa si ese método hace consultas, modifica estado o falla con determinados argumentos. Por ejemplo, al usar `anyLong()` durante la configuración, la llamada puede pasar `0L` al método real.
+
+Con:
+
+```java
+doReturn(preguntas)
+    .when(preguntaRepository)
+    .findPreguntasPorExamenId(anyLong());
+```
+
+no ejecutamos ese método real durante la configuración.
+
+### Ejemplo de error evitado
+
+```java
+class Calculadora {
+    int dividir(int a, int b) { return a / b; }
+}
+Calculadora calculadora = spy(new Calculadora());
+
+// Ejecutaría el método real y lanzaría ArithmeticException:
+// when(calculadora.dividir(10, 0)).thenReturn(5);
+
+// Configura el retorno sin ejecutar la división:
+doReturn(5).when(calculadora).dividir(10, 0);
+assertEquals(5, calculadora.dividir(10, 0));
+```
+
+## Con anotaciones `@Spy` y `@InjectMocks`
+
+```java
+@ExtendWith(MockitoExtension.class)
+class ExamenServiceImplSpyTest {
+
+    @Spy
+    ExamenRepositoryImpl repository;
+
+    @Spy
+    PreguntasRepositoryImpl preguntaRepository;
+
+    @InjectMocks
+    ExamenServiceImpl service;
+
+    @Test
+    void testSpyConAnotaciones() {
+        List<String> preguntas = Arrays.asList("aritmetica");
+
+        doReturn(preguntas).when(preguntaRepository)
+            .findPreguntasPorExamenId(anyLong());
+
+        Examen examen = service.findExamenPorNombreConPreguntas("Matematicas");
+
+        assertEquals(5L, examen.getId());
+        assertEquals("Matematicas", examen.getNombre());
+        assertEquals(1, examen.getPreguntas().size());
+        assertTrue(examen.getPreguntas().contains("aritmetica"));
+
+        verify(repository).findAll();
+        verify(preguntaRepository).findPreguntasPorExamenId(5L);
+    }
+}
+```
+
+- **`@ExtendWith(MockitoExtension.class)`** integra Mockito con JUnit 5 e inicializa las anotaciones.
+- **`@Spy`** crea un espía que llama a métodos reales por defecto.
+- **`@InjectMocks`** crea el servicio real e intenta inyectarle mocks o spies. No lo convierte en mock.
+- **`doReturn()`** redefine el valor que devuelve un método del spy sin ejecutarlo al configurarlo.
+- **`verify()`** comprueba llamadas efectuadas al objeto espiado.
+
+## Comparación rápida
+
+| Operación | Mock | Spy |
+|---|---|---|
+| Comportamiento por defecto | Respuestas predeterminadas de Mockito | Métodos reales |
+| Modificar un método | `when/thenReturn`, `doReturn`, etc. | `doReturn`, `doThrow`, etc. |
+| Crear | `mock()`, `@Mock` | `spy()`, `@Spy` |
+| Ejecutar método real | `doCallRealMethod()` si es posible | Por defecto |
+
+## Consejos
+
+- Para **pruebas unitarias de servicios**, suele ser preferible simular las dependencias con `@Mock`, porque así se aísla mejor la lógica del servicio.
+- Usa spies cuando tengas una razón concreta para conservar parte del comportamiento real y modificar otra parte.
+- Un spy **no significa una base de datos real**: en este ejemplo, las implementaciones devuelven datos Java de la clase `Datos`.
+- En las pruebas, utiliza `5L` para comparar con un ID `Long` y verifica la llamada con el ID exacto cuando eso forme parte del comportamiento que deseas asegurar.
+
+**Idea clave:** `@Spy` ejecuta los métodos reales por defecto; `doReturn()` sustituye el resultado de un método seleccionado sin ejecutarlo al configurar la prueba.
+
+

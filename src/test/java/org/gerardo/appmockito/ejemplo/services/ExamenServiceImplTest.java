@@ -17,6 +17,7 @@ import org.mockito.stubbing.Answer;
 
 import static org.mockito.Mockito.*;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -350,4 +351,27 @@ class ExamenServiceImplTest {
         assertEquals(5L,examen.getId());
         assertEquals("Matematicas",examen.getNombre());
     }
+
+    @Test
+    void testSpy(){
+        ExamenRepository examenRepository = spy(ExamenRepositoryImpl.class); // misma sintaxis que un mock
+        PreguntaRepository preguntaRepository = spy(PreguntasRepositoryImpl.class);
+        ExamenService examenService = new ExamenServiceImpl(examenRepository,preguntaRepository);
+
+        List<String> preguntas = Arrays.asList("aritmetica");
+//        when(preguntaRepository.findPreguntasPorExamenId(anyLong())).thenReturn(preguntas);
+        doReturn(preguntas).when(preguntaRepository).findPreguntasPorExamenId(anyLong());
+
+        Examen examen = examenService.findExamenPorNombreConPreguntas("Matematicas");
+
+        assertEquals(5, examen.getId());
+        assertEquals("Matematicas", examen.getNombre());
+        assertEquals(1, examen.getPreguntas().size());
+        assertTrue(examen.getPreguntas().contains("aritmetica"));
+
+        verify(examenRepository).findAll();
+        verify(preguntaRepository).findPreguntasPorExamenId(anyLong());
+    }
+
+
 }
