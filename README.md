@@ -1410,3 +1410,104 @@ assertEquals(5L, captor.getValue());
 ## Conclusión
 
 `ArgumentCaptor` permite confirmar **qué dato salió del servicio y llegó al repositorio simulado**. En este ejemplo, la prueba demuestra que al buscar "Matematicas" el servicio pidió preguntas con el ID `5L`, siempre que la llamada haya ocurrido como se esperaba.
+
+
+# doThrow para comprobar excepciones en métodos void
+
+## ¿Qué es `doThrow()`?
+
+`doThrow()` es una herramienta de Mockito que permite **configurar un mock para que lance una excepción** cuando se invoque determinado método. Resulta especialmente útil para métodos `void`, ya que estos no devuelven un valor que podamos usar dentro de `when(...).thenThrow(...)`.
+
+**Analogía:** imagina que tu servicio intenta guardar preguntas en un almacén, pero el encargado (repositorio simulado) tiene instrucciones de lanzar un error cuando se le pida guardar la lista. Así compruebas cómo reacciona tu servicio ante el fallo.
+
+## Ejemplo de la prueba
+
+```java
+@Test
+void testDoThrow() {
+    Examen examen = Datos.EXAMEN;
+    examen.setPreguntas(Datos.PREGUNTAS);
+
+    doThrow(IllegalArgumentException.class)
+        .when(preguntaRepository)
+        .guardarVarias(anyList());
+
+    assertThrows(IllegalArgumentException.class, () -> {
+        service.guardar(examen);
+    });
+}
+```
+
+### Paso a paso
+
+1. `Examen examen = Datos.EXAMEN;` obtiene el examen de prueba.
+2. `examen.setPreguntas(Datos.PREGUNTAS);` le asigna una lista de preguntas.
+3. `doThrow(IllegalArgumentException.class)` configura la excepción que lanzará el mock.
+4. `.when(preguntaRepository).guardarVarias(anyList())` indica que la excepción aparecerá cuando se invoque `guardarVarias(...)` con una lista no nula.
+5. `service.guardar(examen)` ejecuta el método **real** del servicio, que debe llegar a llamar a ese repositorio.
+6. `assertThrows(...)` comprueba que la ejecución de la lambda lance `IllegalArgumentException` (o una subclase).
+
+**Importante:** Mockito no invoca `guardarVarias(...)` durante la configuración. La excepción se dispara después, si la ejecución real llega a llamar al mock con un argumento que coincide. Si el servicio captura esa excepción y no la vuelve a lanzar, `assertThrows` fallará.
+
+## ¿Por qué no usar `when().thenThrow()` en `void`?
+
+Esto no compila si `guardarVarias` devuelve `void`:
+
+```java
+// Incorrecto para un método void:
+when(preguntaRepository.guardarVarias(anyList()))
+    .thenThrow(IllegalArgumentException.class);
+```
+
+`when(...)` requiere una expresión con valor, pero un método `void` no produce ninguno. Para ello se utiliza:
+
+```java
+doThrow(IllegalArgumentException.class)
+    .when(preguntaRepository)
+    .guardarVarias(anyList());
+```
+
+## Diferencia entre Mockito y JUnit 5
+
+| Herramienta | Función |
+| --- | --- |
+| `doThrow(...)` (Mockito) | Prepara el mock para **lanzar** la excepción. |
+| `when(preguntaRepository)` (Mockito) | Selecciona el mock cuyo comportamiento vamos a configurar. |
+| `anyList()` (Mockito) | Hace coincidir cualquier lista no nula; no restringe sus elementos. |
+| `assertThrows(...)` (JUnit 5) | Comprueba que el código probado **lance** la excepción. |
+
+## Versión mejorada
+
+```java
+@Test
+void testDoThrow() {
+    Examen examen = Datos.EXAMEN;
+    examen.setPreguntas(Datos.PREGUNTAS);
+
+    doThrow(new IllegalArgumentException("Error al guardar preguntas"))
+        .when(preguntaRepository)
+        .guardarVarias(anyList());
+
+    IllegalArgumentException error = assertThrows(
+        IllegalArgumentException.class,
+        () -> service.guardar(examen)
+    );
+
+    assertEquals("Error al guardar preguntas", error.getMessage());
+    verify(preguntaRepository).guardarVarias(anyList());
+}
+```
+
+La verificación adicional confirma que el mock recibió la llamada (si la ejecución llega hasta ella). La aserción del mensaje comprueba que la excepción observada tenga el mensaje configurado; este ejemplo presupone que el servicio no cambia esa excepción.
+
+## Nota sobre `Datos.EXAMEN`
+
+Si `Datos.EXAMEN` es un objeto estático compartido entre pruebas, al llamar `setPreguntas(...)` se modifica ese mismo objeto. Conviene construir un examen nuevo para cada prueba para evitar interferencias.
+
+## Resumen
+
+- `doThrow(...).when(mock).metodoVoid(...)` configura una excepción en un método `void` del mock.
+- `assertThrows(...)` verifica que esa excepción llegue al código que ejecuta la prueba.
+- `anyList()` coincide con una lista no nula, sin importar su contenido.
+- El servicio es real; lo que simula Mockito es la dependencia (`preguntaRepository`).
+- Si el método del servicio nunca llama al método configurado, la excepción no se producirá por esa configuración.
