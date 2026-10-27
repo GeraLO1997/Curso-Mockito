@@ -269,11 +269,65 @@ class ExamenServiceImplTest {
     @Test
     void testDoThrow() {
         Examen examen = Datos.EXAMEN;
-        examen.setPreguntas(Datos.PREGUNTAS);
+        examen.setPreguntas(Datos.PREGUNTAS); // se lanza la excepcion si no le asignamos las preguntas
         doThrow(IllegalArgumentException.class).when(preguntaRepository).guardarVarias(anyList());
 
         assertThrows(IllegalArgumentException.class, () -> {
             service.guardar(examen);
         });
+    }
+
+    @Test
+    void testDoAnswer(){
+        when(repository.findAll()).thenReturn(Datos.EXAMENES);
+//        when(preguntaRepository.findPreguntasPorExamenId(anyLong())).thenReturn(Datos.PREGUNTAS);
+
+        doAnswer(invocationOnMock -> {
+            Long id = invocationOnMock.getArgument(0);
+            return id == 5L ? Datos.PREGUNTAS : null;
+        }).when(preguntaRepository).findPreguntasPorExamenId(anyLong());
+
+        Examen examen = service.findExamenPorNombreConPreguntas("Matematicas");
+
+        assertEquals(5L, examen.getId());
+        assertEquals("Matematicas",examen.getNombre());
+        assertEquals(5,examen.getPreguntas().size());
+        assertTrue(examen.getPreguntas().contains("geometria"));
+
+        verify(preguntaRepository).findPreguntasPorExamenId(anyLong());
+    }
+
+
+    // con un id incremental
+    @Test
+    @DisplayName("Guardar Examen con preguntas")
+        // Given
+    void testDoAnswerGuardarExamenConPeguntas(){
+        Examen newExamen = Datos.EXAMEN;
+        newExamen.setPreguntas(Datos.PREGUNTAS);
+
+//        when(repository.guardar(any(Examen.class))).then();
+        doAnswer(new Answer<Examen>(){
+
+            Long secuencia = 8L;
+
+            @Override
+            public Examen answer(InvocationOnMock invocation) throws Throwable {
+                Examen examen = invocation.getArgument(0);
+                examen.setId(secuencia++);
+                return examen;
+            }
+        }).when(repository).guardar(any(Examen.class));
+
+        // When
+        Examen examen = service.guardar(newExamen); // agui lo guardamos
+
+        // Then
+        assertNotNull(examen.getId());
+        assertEquals(8L,examen.getId());
+        assertEquals("Fisica", examen.getNombre());
+
+        verify(repository).guardar(any(Examen.class));
+        verify(preguntaRepository).guardarVarias(anyList());
     }
 }

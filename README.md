@@ -1511,3 +1511,122 @@ Si `Datos.EXAMEN` es un objeto estático compartido entre pruebas, al llamar `se
 - `anyList()` coincide con una lista no nula, sin importar su contenido.
 - El servicio es real; lo que simula Mockito es la dependencia (`preguntaRepository`).
 - Si el método del servicio nunca llama al método configurado, la excepción no se producirá por esa configuración.
+
+
+# Usando doAnswer() en Mockito
+
+## ¿Qué es?
+
+`doAnswer()` permite configurar una **respuesta dinámica** para un método de un mock. A diferencia de `thenReturn(valor)`, que devuelve un valor prefijado, con `doAnswer()` podemos leer los argumentos, ejecutar una condición, modificar un objeto o generar valores.
+
+**Analogía:** `thenReturn()` es una máquina que siempre entrega el mismo producto; `doAnswer()` observa el botón pulsado y decide qué entregar.
+
+## Ejemplo 1: responder según el ID
+
+```java
+@Test
+void testDoAnswer() {
+    when(repository.findAll()).thenReturn(Datos.EXAMENES);
+
+    doAnswer(invocation -> {
+        Long id = invocation.getArgument(0);
+        return id == 5L ? Datos.PREGUNTAS : null;
+    }).when(preguntaRepository).findPreguntasPorExamenId(anyLong());
+
+    Examen examen = service.findExamenPorNombreConPreguntas("Matematicas");
+
+    assertEquals(5L, examen.getId());
+    assertEquals("Matematicas", examen.getNombre());
+    assertEquals(5, examen.getPreguntas().size());
+    assertTrue(examen.getPreguntas().contains("geometria"));
+
+    verify(preguntaRepository).findPreguntasPorExamenId(5L);
+}
+```
+
+### Explicación
+
+- `when(repository.findAll()).thenReturn(Datos.EXAMENES)` simula la lista de exámenes.
+- `doAnswer(invocation -> {...})` define una respuesta personalizada para el repositorio de preguntas.
+- `InvocationOnMock` es la interfaz que representa la llamada interceptada; `getArgument(0)` lee su primer argumento.
+- `id == 5L ? Datos.PREGUNTAS : null` devuelve las preguntas solo para el examen 5. Como el matcher es `anyLong()`, la configuración aplica a cualquier `long` o `Long` no nulo.
+- El **servicio real** se ejecuta y recibe las respuestas de los mocks.
+- `assertEquals()` y `assertTrue()` son aserciones de JUnit 5.
+- `verify(...).findPreguntasPorExamenId(5L)` comprueba que se usó exactamente el ID esperado. `anyLong()` solo garantizaría que se pasó algún ID no nulo.
+
+> Nota: devolver `null` puede ser peligroso si el servicio espera una lista; para muchas pruebas es mejor `Collections.emptyList()`.
+
+## Ejemplo 2: simular un ID autoincremental
+
+```java
+@Test
+@DisplayName("Guardar Examen con preguntas")
+void testDoAnswerGuardarExamenConPreguntas() {
+    Examen nuevo = new Examen(null, "Fisica");
+    nuevo.setPreguntas(Datos.PREGUNTAS);
+
+    doAnswer(new Answer<Examen>() {
+        long secuencia = 8L;
+
+        @Override
+        public Examen answer(InvocationOnMock invocation) throws Throwable {
+            Examen examen = invocation.getArgument(0);
+            examen.setId(secuencia++);
+            return examen;
+        }
+    }).when(repository).guardar(any(Examen.class));
+
+    Examen guardado = service.guardar(nuevo);
+
+    assertNotNull(guardado.getId());
+    assertEquals(8L, guardado.getId());
+    assertEquals("Fisica", guardado.getNombre());
+    verify(repository).guardar(any(Examen.class));
+    verify(preguntaRepository).guardarVarias(anyList());
+}
+```
+
+> Ajusta `new Examen(null, "Fisica")` al constructor real de tu clase. Crear un objeto nuevo evita modificar un `Datos.EXAMEN` compartido entre pruebas.
+
+### ¿Qué hace cada parte?
+
+- `Answer<Examen>` es una **interfaz funcional** de Mockito: establece el comportamiento del mock y el tipo de respuesta (`Examen`).
+- `new Answer<Examen>() { ... }` crea una **clase anónima**, que implementa `answer(InvocationOnMock invocation)`.
+- `InvocationOnMock.getArgument(0)` obtiene el examen pasado a `guardar()`.
+- `secuencia = 8L` define el ID inicial **para esa instancia de Answer**.
+- `examen.setId(secuencia++)` asigna 8 en la primera llamada, 9 en la segunda, etc.
+- `return examen` devuelve el **mismo objeto modificado**, sin almacenar nada en una BD real.
+- `verify()` confirma que se invocaron los dos repositorios, no que se hayan persistido datos.
+
+### Versión más corta con lambda
+
+```java
+AtomicLong secuencia = new AtomicLong(8L);
+
+doAnswer(invocation -> {
+    Examen examen = invocation.getArgument(0);
+    examen.setId(secuencia.getAndIncrement());
+    return examen;
+}).when(repository).guardar(any(Examen.class));
+```
+
+`AtomicLong` pertenece a `java.util.concurrent.atomic`. Aquí se usa para poder actualizar la secuencia desde la lambda; en un test sencillo no implica que estemos haciendo operaciones concurrentes.
+
+## Comparación rápida
+
+| Método | ¿Para qué sirve? |
+|---|---|
+| `thenReturn(valor)` | Devolver un valor fijo |
+| `thenThrow(excepcion)` | Lanzar una excepción |
+| `doThrow(excepcion)` | Lanzar una excepción; útil con métodos `void` |
+| `doAnswer(respuesta)` | Ejecutar lógica personalizada y decidir qué devolver |
+| `getArgument(0)` | Leer el primer argumento de la llamada al mock |
+| `verify(mock)` | Comprobar interacciones con el mock |
+
+`doAnswer()` **no ejecuta el método real del repositorio**: sustituye su comportamiento. La lógica que sí queremos probar es la del servicio.
+
+## ¿Cuándo conviene usarlo?
+
+Úsalo cuando la respuesta depende de los parámetros, cuando necesitas mutar un argumento o simular una secuencia de identificadores. Si el resultado siempre es fijo, `thenReturn()` suele ser más claro.
+
+
