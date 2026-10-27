@@ -1891,3 +1891,116 @@ class ExamenServiceImplSpyTest {
 **Idea clave:** `@Spy` ejecuta los métodos reales por defecto; `doReturn()` sustituye el resultado de un método seleccionado sin ejecutarlo al configurar la prueba.
 
 
+# Verificando el orden de las invocaciones con InOrder en Mockito
+
+## ¿Qué es InOrder?
+
+`InOrder` es una interfaz de Mockito que permite verificar que determinadas llamadas a uno o varios mocks ocurrieron en el orden esperado. A diferencia de `verify()`, no solo comprobamos que una interacción existió, sino también su secuencia.
+
+**Analogía:** en una cafetería, preparar el café y entregarlo son dos acciones necesarias; `verify()` confirma que ambas ocurrieron, mientras `InOrder` permite comprobar que primero se preparó y luego se entregó.
+
+## Primera prueba: orden dentro de un mock
+
+```java
+@Test
+void testOrdenDeInvocaciones() {
+    when(repository.findAll()).thenReturn(Datos.EXAMENES);
+
+    service.findExamenPorNombreConPreguntas("Matematicas");
+    service.findExamenPorNombreConPreguntas("Lenguaje");
+
+    InOrder inOrder = inOrder(preguntaRepository);
+    inOrder.verify(preguntaRepository).findPreguntasPorExamenId(5L);
+    inOrder.verify(preguntaRepository).findPreguntasPorExamenId(6L);
+}
+```
+
+1. `when(repository.findAll()).thenReturn(Datos.EXAMENES)` prepara la lista de exámenes del repositorio simulado.
+2. La primera llamada al servicio busca Matemáticas (ID `5L`) y solicita sus preguntas.
+3. La segunda llamada busca Lenguaje (ID `6L`) y solicita sus preguntas.
+4. `inOrder(preguntaRepository)` crea un verificador del orden de las interacciones con ese mock.
+5. Los `inOrder.verify(...)` comprueban que se solicitó primero el ID `5L` y después el `6L`.
+
+La secuencia esperada es:
+
+```text
+preguntaRepository.findPreguntasPorExamenId(5L)
+preguntaRepository.findPreguntasPorExamenId(6L)
+```
+
+Esto no comprueba explícitamente las llamadas a `repository.findAll()` porque ese mock no fue incluido en `inOrder(...)`.
+
+## Segunda prueba: orden entre dos mocks
+
+```java
+@Test
+void testOrdenDeInvocaciones2() {
+    when(repository.findAll()).thenReturn(Datos.EXAMENES);
+
+    service.findExamenPorNombreConPreguntas("Matematicas");
+    service.findExamenPorNombreConPreguntas("Lenguaje");
+
+    InOrder inOrder = inOrder(repository, preguntaRepository);
+    inOrder.verify(repository).findAll();
+    inOrder.verify(preguntaRepository).findPreguntasPorExamenId(5L);
+    inOrder.verify(repository).findAll();
+    inOrder.verify(preguntaRepository).findPreguntasPorExamenId(6L);
+}
+```
+
+Aquí se verifica el orden de llamadas *entre ambos* repositorios:
+
+```text
+1. repository.findAll()
+2. preguntaRepository.findPreguntasPorExamenId(5L)
+3. repository.findAll()
+4. preguntaRepository.findPreguntasPorExamenId(6L)
+```
+
+Así se puede comprobar que cada búsqueda del servicio consulta primero los exámenes y después las preguntas correspondientes.
+
+## Diferencia entre verify() e InOrder
+
+```java
+verify(preguntaRepository).findPreguntasPorExamenId(5L);
+verify(preguntaRepository).findPreguntasPorExamenId(6L);
+```
+
+Estas verificaciones comprueban que las llamadas ocurrieron, pero no establecen cuál fue primero.
+
+```java
+InOrder orden = inOrder(preguntaRepository);
+orden.verify(preguntaRepository).findPreguntasPorExamenId(5L);
+orden.verify(preguntaRepository).findPreguntasPorExamenId(6L);
+```
+
+Ahora verificamos la secuencia.
+
+## ¿Qué ocurre si hay llamadas extra?
+
+Por defecto, `InOrder` comprueba que puede encontrar las llamadas verificadas en la secuencia indicada; no exige automáticamente que sean las únicas interacciones con los mocks. Si necesitamos verificar que no quedaron interacciones adicionales sin verificar en el orden, podemos usar:
+
+```java
+inOrder.verifyNoMoreInteractions();
+```
+
+Esto es distinto de simplemente verificar dos llamadas en orden. Úsalo solo cuando sea un requisito real de la prueba.
+
+## Métodos e interfaces empleados
+
+| Elemento | Función |
+|---|---|
+| `InOrder` | Interfaz de Mockito para verificar secuencias de invocaciones. |
+| `inOrder(mock1, mock2)` | Crea un verificador para uno o varios mocks. |
+| `inOrder.verify(mock)` | Comprueba una invocación en el orden esperado. |
+| `verify(mock)` | Comprueba una interacción, sin exigir orden relativo. |
+| `inOrder.verifyNoMoreInteractions()` | Comprueba que no quedan interacciones sin verificar después de la última verificada en la secuencia. |
+| `when(...).thenReturn(...)` | Configura la respuesta de un mock. |
+
+## Recomendación
+
+Usa `InOrder` cuando el **orden sea un requisito del comportamiento**, como validar antes de guardar, cobrar antes de confirmar o consultar un registro antes de procesarlo. Si el orden no es importante para el resultado esperado, `verify()` suele ser más sencillo y hace la prueba menos frágil.
+
+**Idea clave:** `verify()` pregunta «¿se llamó este método?»; `InOrder` pregunta «¿se llamó en esta secuencia?».
+
+
