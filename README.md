@@ -2003,4 +2003,92 @@ Usa `InOrder` cuando el **orden sea un requisito del comportamiento**, como vali
 
 **Idea clave:** `verify()` pregunta «¿se llamó este método?»; `InOrder` pregunta «¿se llamó en esta secuencia?».
 
+# Verificando el número de invocaciones de los mocks en Mockito
+
+## ¿Para qué sirve?
+
+Mockito permite comprobar **cuántas veces se llamó a un método de un mock** mediante `verify(mock, modo)`. Esto sirve para detectar llamadas duplicadas, llamadas faltantes o interacciones que nunca deberían suceder.
+
+## Ejemplo
+
+```java
+@Test
+void testNumeroDeInvocaciones() {
+    when(repository.findAll()).thenReturn(Datos.EXAMENES);
+
+    service.findExamenPorNombreConPreguntas("Matematicas");
+
+    verify(preguntaRepository, times(1)).findPreguntasPorExamenId(5L);
+    verify(preguntaRepository, atLeast(1)).findPreguntasPorExamenId(5L);
+    verify(preguntaRepository, atLeastOnce()).findPreguntasPorExamenId(5L);
+    verify(preguntaRepository, atMost(1)).findPreguntasPorExamenId(5L);
+}
+```
+
+1. `when(repository.findAll()).thenReturn(Datos.EXAMENES)` prepara una respuesta simulada.
+2. `service.findExamenPorNombreConPreguntas("Matematicas")` ejecuta la lógica real del servicio. Si encuentra el examen con ID `5L`, llama a `preguntaRepository.findPreguntasPorExamenId(5L)`.
+3. Cada `verify(...)` **comprueba el historial de llamadas** que Mockito registró; **no vuelve a ejecutar el método**.
+
+## Modos de verificación
+
+| Modo | Significado | ¿Pasa si hubo exactamente una llamada? |
+|---|---|---|
+| `times(1)` | Exactamente una llamada | Sí |
+| `atLeast(1)` | Una o más llamadas | Sí |
+| `atLeastOnce()` | Una o más llamadas | Sí |
+| `atMost(1)` | Cero o una llamada | Sí |
+| `never()` o `times(0)` | Ninguna llamada | No |
+| `times(2)` | Exactamente dos llamadas | No |
+| `atMostOnce()` | Cero o una llamada | Sí |
+
+`verify(mock).metodo()` equivale a `verify(mock, times(1)).metodo()`.
+
+### Tabla de ejemplos
+
+| Llamadas reales | `times(1)` | `atLeastOnce()` | `atMost(1)` | `never()` |
+|---:|---|---|---|---|
+| 0 | Falla | Falla | Pasa | Pasa |
+| 1 | Pasa | Pasa | Pasa | Falla |
+| 2 | Falla | Pasa | Falla | Falla |
+
+## Importante: verificar no significa invocar
+
+En el código original, `atLeastOnce()` aparecía dos veces. Repetir una verificación es redundante, no significa que Mockito cuente dos llamadas. Todas las verificaciones inspeccionan el mismo historial registrado.
+
+Además, las verificaciones se refieren a **ese método con ese argumento** (`5L`); otras llamadas con IDs diferentes no cuentan para esta condición concreta.
+
+## Ejemplo: detectar una llamada duplicada
+
+```java
+service.findExamenPorNombreConPreguntas("Matematicas");
+service.findExamenPorNombreConPreguntas("Matematicas");
+
+verify(preguntaRepository, times(1)).findPreguntasPorExamenId(5L);
+// Falla si el servicio llamó al repositorio dos veces.
+```
+
+Se asume que el servicio llama una vez al repositorio por cada búsqueda y no existe caché que evite la segunda llamada.
+
+## Otros usos
+
+```java
+verify(preguntaRepository, never()).guardarVarias(anyList());
+verify(repository, times(1)).findAll();
+verify(preguntaRepository, atMost(2)).findPreguntasPorExamenId(5L);
+```
+
+Para verificar que no hubo **ninguna interacción** con un mock: `verifyNoInteractions(preguntaRepository)`.
+
+## Conceptos de las APIs
+
+- `verify()`: método estático de Mockito que verifica interacciones previas con mocks.
+- `times(int n)`: exige exactamente `n` invocaciones.
+- `atLeast(int n)`: exige `n` o más.
+- `atLeastOnce()`: equivalente a `atLeast(1)`.
+- `atMost(int n)`: exige `n` o menos.
+- `atMostOnce()`: equivalente a `atMost(1)`.
+- `never()`: equivalente a `times(0)`.
+- `when().thenReturn()`: configura un mock y no comprueba el número de llamadas.
+
+**Idea clave:** el modo de verificación expresa una regla sobre el historial de invocaciones, no produce llamadas nuevas.
 
