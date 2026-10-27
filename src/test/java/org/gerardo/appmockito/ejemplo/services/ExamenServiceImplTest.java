@@ -1,8 +1,11 @@
 package org.gerardo.appmockito.ejemplo.services;
 
+import org.gerardo.appmockito.ejemplo.Datos;
 import org.gerardo.appmockito.ejemplo.models.Examen;
 import org.gerardo.appmockito.ejemplo.repositories.ExamenRepository;
+import org.gerardo.appmockito.ejemplo.repositories.ExamenRepositoryImpl;
 import org.gerardo.appmockito.ejemplo.repositories.PreguntaRepository;
+import org.gerardo.appmockito.ejemplo.repositories.PreguntasRepositoryImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -14,7 +17,6 @@ import org.mockito.stubbing.Answer;
 
 import static org.mockito.Mockito.*;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -25,9 +27,9 @@ import static org.junit.jupiter.api.Assertions.*;
 class ExamenServiceImplTest {
 
     @Mock
-    ExamenRepository repository;
+    ExamenRepositoryImpl repository;
     @Mock
-    PreguntaRepository preguntaRepository;
+    PreguntasRepositoryImpl preguntaRepository;
 
     @InjectMocks
     ExamenServiceImpl service; // Aqui necesitamos la clase concreta por que no se puede instanciar una interface
@@ -329,5 +331,23 @@ class ExamenServiceImplTest {
 
         verify(repository).guardar(any(Examen.class));
         verify(preguntaRepository).guardarVarias(anyList());
+    }
+
+    // Para ejecutar este test primero tenemos que cambiar la implementacion por PreguntaRepositoryImpl para usar
+    // la los repositorios reales y no la interface
+//    @Mock
+//    ExamenRepositoryImpl repository;
+//    @Mock
+//    PreguntasRepositoryImpl preguntaRepository;
+    @Test
+    void testDoCallRealMethod(){
+        when(repository.findAll()).thenReturn(Datos.EXAMENES);
+//        when(preguntaRepository.findPreguntasPorExamenId(anyLong())).thenReturn(Datos.PREGUNTAS);
+        doCallRealMethod().when(preguntaRepository).findPreguntasPorExamenId(anyLong());
+
+        Examen examen = service.findExamenPorNombreConPreguntas("Matematicas");
+
+        assertEquals(5L,examen.getId());
+        assertEquals("Matematicas",examen.getNombre());
     }
 }

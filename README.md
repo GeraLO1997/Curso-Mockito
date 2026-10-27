@@ -1630,3 +1630,129 @@ doAnswer(invocation -> {
 Úsalo cuando la respuesta depende de los parámetros, cuando necesitas mutar un argumento o simular una secuencia de identificadores. Si el resultado siempre es fijo, `thenReturn()` suele ser más claro.
 
 
+# Usando doCallRealMethod() en Mockito
+
+## ¿Qué es?
+
+`doCallRealMethod()` permite indicar que **una llamada concreta a un método de un mock ejecute su implementación real**, en lugar de devolver la respuesta predeterminada del mock.
+
+Esto no convierte todo el mock en un objeto real: los demás métodos seguirán simulados, salvo que se configuren de otra forma.
+
+## ¿Por qué necesitas una implementación concreta?
+
+Una interfaz como `PreguntaRepository` solo declara el contrato:
+
+```java
+public interface PreguntaRepository {
+    List<String> findPreguntasPorExamenId(Long id);
+    void guardarVarias(List<String> preguntas);
+}
+```
+
+La clase `PreguntasRepositoryImpl` sí tiene código ejecutable:
+
+```java
+public class PreguntasRepositoryImpl implements PreguntaRepository {
+    @Override
+    public List<String> findPreguntasPorExamenId(Long id) {
+        System.out.println("PreguntasRepositoryImpl.findPreguntasPorExamenId");
+        return Datos.PREGUNTAS;
+    }
+
+    @Override
+    public void guardarVarias(List<String> preguntas) {
+        System.out.println("PreguntasRepositoryImpl.guardarVarias");
+    }
+}
+```
+
+**Importante:** un mock de una interfaz no tiene una implementación concreta de ese método que Mockito pueda invocar. Por eso, para este ejemplo, se crea un mock de `PreguntasRepositoryImpl`.
+
+## Preparación de la prueba
+
+```java
+@ExtendWith(MockitoExtension.class)
+class ExamenServiceImplTest {
+
+    @Mock
+    ExamenRepositoryImpl repository;
+
+    @Mock
+    PreguntasRepositoryImpl preguntaRepository;
+
+    @InjectMocks
+    ExamenServiceImpl service;
+
+    @Test
+    void testDoCallRealMethod() {
+        when(repository.findAll()).thenReturn(Datos.EXAMENES);
+
+        doCallRealMethod()
+            .when(preguntaRepository)
+            .findPreguntasPorExamenId(anyLong());
+
+        Examen examen = service.findExamenPorNombreConPreguntas("Matematicas");
+
+        assertEquals(5L, examen.getId());
+        assertEquals("Matematicas", examen.getNombre());
+        assertEquals(Datos.PREGUNTAS, examen.getPreguntas());
+
+        verify(repository).findAll();
+        verify(preguntaRepository).findPreguntasPorExamenId(5L);
+    }
+}
+```
+
+Este ejemplo supone que el servicio inyecta ambos repositorios y coloca en el examen la lista devuelta por `findPreguntasPorExamenId`.
+
+### Paso a paso
+
+1. `@Mock ExamenRepositoryImpl repository`: crea un mock de la clase concreta. **No** se ejecuta automáticamente su `findAll()` real.
+2. `when(repository.findAll()).thenReturn(Datos.EXAMENES)`: configura la respuesta simulada del primer repositorio.
+3. `@Mock PreguntasRepositoryImpl preguntaRepository`: crea otro mock, también de una clase concreta.
+4. `doCallRealMethod().when(preguntaRepository).findPreguntasPorExamenId(anyLong())`: permite ejecutar el cuerpo real de **este método específico** cuando reciba un `Long` no nulo.
+5. `service.findExamenPorNombreConPreguntas("Matematicas")`: ejecuta el método real del servicio; el servicio consulta los repositorios inyectados.
+6. La llamada `repository.findAll()` devuelve `Datos.EXAMENES` por el `thenReturn()`; **no imprime** el mensaje del `ExamenRepositoryImpl.findAll()` real.
+7. La llamada `preguntaRepository.findPreguntasPorExamenId(5L)` ejecuta el método real de `PreguntasRepositoryImpl`, imprime el mensaje y devuelve `Datos.PREGUNTAS`.
+8. `assertEquals` comprueba el resultado y `verify` comprueba las interacciones con los mocks.
+
+## ¿Qué función cumple cada elemento?
+
+| Elemento | Función |
+|---|---|
+| `@ExtendWith(MockitoExtension.class)` | Integra Mockito con el ciclo de vida de JUnit 5. |
+| `@Mock` | Crea un objeto simulado, incluso cuando el tipo declarado es una clase concreta. |
+| `@InjectMocks` | Crea el servicio real e intenta inyectarle sus mocks. |
+| `doCallRealMethod()` | Ejecuta el método real seleccionado en el mock. |
+| `when(...).thenReturn(...)` | Configura una respuesta simulada. |
+| `anyLong()` | Coincide con cualquier valor `long` / `Long` no nulo. |
+| `assertEquals()` | Comprueba valores con JUnit 5. |
+| `verify()` | Verifica una llamada al mock. |
+
+## Diferencia entre @Mock, doCallRealMethod() y @Spy
+
+- `@Mock`: por defecto no ejecuta los métodos reales.
+- `@Mock` + `doCallRealMethod()`: ejecuta **solo los métodos configurados** para la llamada real.
+- `@Spy`: por defecto llama a los métodos reales del objeto espiado, salvo aquellos que se configuren para simular otra respuesta.
+
+### Precaución importante
+
+Un **mock de una clase** no es lo mismo que una **instancia real inicializada**. Si la implementación real usa campos, repositorios o dependencias internas, `doCallRealMethod()` puede provocar errores porque esos campos podrían no estar inicializados en el mock.
+
+En tu ejemplo funciona porque el método real mostrado únicamente imprime un mensaje y devuelve `Datos.PREGUNTAS`: no necesita estado interno.
+
+## ¿Por qué mover Datos a main?
+
+Tu `PreguntasRepositoryImpl`, ubicada en `src/main/java`, importa `Datos`. Por tanto, `Datos` debe estar disponible para el código de producción si esa implementación depende de ella: una clase bajo `src/test/java` normalmente no está disponible para compilar `src/main/java`.
+
+**Pero no es una buena práctica mover datos ficticios de prueba a `main` solamente para que un test funcione.** En proyectos reales es preferible que los datos de prueba permanezcan en `src/test/java`, y que las implementaciones de producción utilicen sus fuentes de datos reales. Esta implementación sirve como ejemplo didáctico.
+
+## Ejemplo práctico: cuándo usarlo
+
+Puede ser útil para verificar un método real y simular los demás de una clase, pero usa esta técnica con cuidado: las llamadas parciales a métodos reales pueden acoplar la prueba a detalles internos. Normalmente es más claro probar servicios reales con colaboradores mockeados o emplear un `@Spy` sobre un objeto completamente construido cuando el objetivo sea observar comportamiento parcial.
+
+## Resumen
+
+**`doCallRealMethod()` le dice a un mock: «Para esta llamada, ejecuta el código real de este método».** Requiere un método con implementación real; no hace real al repositorio completo ni crea una base de datos.
+
+

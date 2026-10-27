@@ -1,4 +1,4 @@
-package org.gerardo.appmockito.ejemplo.services;
+package org.gerardo.appmockito.ejemplo;
 
 import org.gerardo.appmockito.ejemplo.models.Examen;
 
